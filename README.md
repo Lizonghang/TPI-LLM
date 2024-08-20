@@ -72,7 +72,6 @@ Below is a list of these options:
 |--------------------|---------------|---------|------------------------------------------------------------------------|
 | `--prompt`         | `""`          | `str`   | The input prompt.                                                      |
 | `--length`         | `20`          | `int`   | Maximum length of the generated sequence.                              |
-| `--stop_token`     | `None`        | `str`   | Token at which generation will stop.                                   |
 | `--prefix`         | `""`          | `str`   | Text added prior to input for context.                                 |
 | `--use_gpu`        | `False`       | `bool`  | Whether to use GPU for inference. If false, use CPU by default.        |
 | `--split_bin`      | `False`       | `bool`  | Split the pretrained model file.                                       |

@@ -125,7 +125,6 @@ if __name__ == "__main__":
     # arguments with default values
     parser.add_argument("--prompt", type=str, default="")
     parser.add_argument("--length", type=int, default=20)
-    parser.add_argument("--stop_token", type=str, default=None)
     parser.add_argument("--prefix", type=str, default="", help="Text added prior to input.")
     parser.add_argument("--use_gpu", action="store_true", help="Whether to use gpu, default to use cpu.")
     parser.add_argument("--fp16", action="store_true", help="Whether to use 16-bit mixed precision.")
