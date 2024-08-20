@@ -31,7 +31,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 
 To get started, you’ll need to download the pretrained model weights from Hugging Face. For example, if you’re 
 using the Llama-2-3B model, you can download the weights manually from [Hugging Face](https://huggingface.co/openlm-research/open_llama_3b_v2). 
-After downloading, save the model files in a directory of your choice, which we’ll refer to as <code><MODEL_FILES></code>.
+After downloading, save the model files in a directory of your choice, which we’ll refer to as `<MODEL_FILES>`.
 
 ## Run TPI-LLM on Your Laptop
 Run the example script for a trial:
@@ -63,3 +63,25 @@ This will slice the pretrained model weights and save them into subdirectories c
 
 For subsequent runs, you can omit the <code>--split_bin</code> option, as the model weights will already be sliced 
 and saved in the respective node directories.
+
+## Optional Arguments
+TPI-LLM provides several optional parameters that you can customize to control various aspects of the inference process. 
+Below is a list of these options:
+
+| Argument           | Default       | Type    | Description                                                            |
+|--------------------|---------------|---------|------------------------------------------------------------------------|
+| `--prompt`         | `""`          | `str`   | The input prompt.                                                      |
+| `--length`         | `20`          | `int`   | Maximum length of the generated sequence.                              |
+| `--stop_token`     | `None`        | `str`   | Token at which generation will stop.                                   |
+| `--prefix`         | `""`          | `str`   | Text added prior to input for context.                                 |
+| `--use_gpu`        | `False`       | `bool`  | Whether to use GPU for inference. If false, use CPU by default.        |
+| `--split_bin`      | `False`       | `bool`  | Split the pretrained model file.                                       |
+| `--save_dir`       | `"split"`     | `str`   | The directory to save split model files.                               |
+| `--split_strategy` | `"uniform"`   | `str`   | Strategy for splitting the model across nodes.                         |
+| `--seed`           | `42`          | `int`   | Random seed for reproducibility.                                       |
+| `--master_ip`      | `"127.0.0.1"` | `str`   | IP address of the master node.                                         |
+| `--master_port`    | `29500`       | `int`   | Port number of the master node.                                        |
+| `--temperature`    | `1.0`         | `float` | Sampling temperature for text generation.                              |
+| `--k`              | `0`           | `int`   | Number of highest probability tokens to keep for top-k sampling.       |
+| `--p`              | `0.9`         | `float` | Cumulative probability for nucleus sampling (top-p).                   |
+| `--memory_window`  | `2`           | `int`   | Size of the memory window used during inference. Should be at least 2. |
