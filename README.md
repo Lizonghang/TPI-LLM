@@ -86,6 +86,8 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
     --model_type llama \
     --model_path <PATH-TO-MODEL-FILES> \
     --length 10 \
+    --master_ip <MASTER_ADDR> \
+    --master_port <MASTER_PORT> \
     --split_bin
 
 # On node 1:
@@ -93,6 +95,8 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
     --model_type llama \
     --model_path <PATH-TO-MODEL-FILES> \
     --length 10 \
+    --master_ip <MASTER_ADDR> \
+    --master_port <MASTER_PORT> \
     --split_bin
 
 # On node 2:
@@ -100,6 +104,8 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
     --model_type llama \
     --model_path <PATH-TO-MODEL-FILES> \
     --length 10 \
+    --master_ip <MASTER_ADDR> \
+    --master_port <MASTER_PORT> \
     --split_bin
     
 # On node 3:
@@ -107,8 +113,13 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
     --model_type llama \
     --model_path <PATH-TO-MODEL-FILES> \
     --length 10 \
+    --master_ip <MASTER_ADDR> \
+    --master_port <MASTER_PORT> \
     --split_bin
 ```
+
+You can set `<MASTER_ADDR>` and `<MASTER_PORT>` of your choice, but make sure that the master node can be accessed 
+by all other nodes.
 
 ## Run on Klonet
 Coming soon.
