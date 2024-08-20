@@ -11,6 +11,9 @@ full-precision Llama-2-3B model on a single Mac with only 8GB of RAM, while main
 below 0.7GB. In the future, we will support larger models, such as Llama-3-8B and Llama-3-70B, across multiple edge 
 devices, and introduce acceleration techniques to ensure efficient inference.
 
+# Updates
+* 2024/08/20: Add support for multi-host tensor parallelism.
+
 # Installation
 1. Clone the repository:
 ```commandline
