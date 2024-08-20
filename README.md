@@ -18,7 +18,15 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 > cd TPI-LLM
 ```
 
-2. Create a new conda environment and install dependencies:
+2. Add `PYTHONPATH` to `.bashrc`:
+```commandline
+> vim ~/.bashrc
+
+# Set PYTHONPATH to the TPI-LLM/src folder
+export PYTHONPATH=<PATH-TO-TPI-LLM>/src
+```
+
+3. Create a new conda environment and install dependencies:
 ```commandline
 > conda create -n tpi-llm python=3.9
 > conda activate tpi-llm
@@ -31,12 +39,17 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 
 To get started, you’ll need to download the pretrained model weights from Hugging Face. For example, if you’re 
 using the Llama-2-3B model, you can download the weights manually from [Hugging Face](https://huggingface.co/openlm-research/open_llama_3b_v2). 
-After downloading, save the model files in a directory of your choice, which we’ll refer to as `<MODEL_FILES>`.
+After downloading, save the model files in a directory of your choice, which we’ll refer to as `<PATH-TO-MODEL-FILES>`.
 
-## Run TPI-LLM on Your Laptop
+## Run on Your Laptop
 Run the example script for a trial:
 ```commandline
-python examples/text-generation.py --model_type llama --model_path <MODEL_FILES> --world_size 4 --length 10 --split_bin
+> python examples/run_multiprocess.py \
+    --model_type llama \
+    --model_path <PATH-TO-MODEL-FILES> \
+    --world_size 4 \
+    --length 10 \
+    --split_bin
 ```
 This command will run 4 processes on a single machine, creating a pseudo-distributed environment that leverages 
 tensor parallelism for Llama inference.
@@ -48,7 +61,7 @@ This will slice the pretrained model weights and save them into subdirectories c
 
 
 ```commandline
-> ls <MODEL_FILES>
+> ls <PATH-TO-MODEL-FILES>
 |- pytorch_model.bin
 |- config.json
 |- ...
@@ -63,6 +76,42 @@ This will slice the pretrained model weights and save them into subdirectories c
 
 For subsequent runs, you can omit the <code>--split_bin</code> option, as the model weights will already be sliced 
 and saved in the respective node directories.
+
+## Run on Multiple Hosts
+Assume we have four hosts 0 ~ 3. Run the following command on each of them:
+
+```commandline
+# On node 0:
+> RANK=0 WORLD_SIZE=4 python examples/run_multihost.py \
+    --model_type llama \
+    --model_path <PATH-TO-MODEL-FILES> \
+    --length 10 \
+    --split_bin
+
+# On node 1:
+> RANK=1 WORLD_SIZE=4 python examples/run_multihost.py \
+    --model_type llama \
+    --model_path <PATH-TO-MODEL-FILES> \
+    --length 10 \
+    --split_bin
+
+# On node 2:
+> RANK=2 WORLD_SIZE=4 python examples/run_multihost.py \
+    --model_type llama \
+    --model_path <PATH-TO-MODEL-FILES> \
+    --length 10 \
+    --split_bin
+    
+# On node 3:
+> RANK=3 WORLD_SIZE=4 python examples/run_multihost.py \
+    --model_type llama \
+    --model_path <PATH-TO-MODEL-FILES> \
+    --length 10 \
+    --split_bin
+```
+
+## Run on Klonet
+Coming soon.
 
 ## Optional Arguments
 TPI-LLM provides several optional parameters that you can customize to control various aspects of the inference process. 
