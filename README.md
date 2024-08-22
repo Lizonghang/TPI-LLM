@@ -13,6 +13,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 
 # Updates
 * 2024/08/20: Add support for multi-host tensor parallelism.
+* 2024/08/22: Add support for Llama-3.1-8B.
 
 # Installation
 1. Clone the repository:
@@ -139,7 +140,6 @@ Below is a list of these options:
 | `--use_gpu`        | `False`       | `bool`  | Whether to use GPU for inference. If false, use CPU by default.        |
 | `--split_bin`      | `False`       | `bool`  | Split the pretrained model file.                                       |
 | `--save_dir`       | `"split"`     | `str`   | The directory to save split model files.                               |
-| `--split_strategy` | `"uniform"`   | `str`   | Strategy for splitting the model across nodes.                         |
 | `--seed`           | `42`          | `int`   | Random seed for reproducibility.                                       |
 | `--master_ip`      | `"127.0.0.1"` | `str`   | IP address of the master node.                                         |
 | `--master_port`    | `29500`       | `int`   | Port number of the master node.                                        |
