@@ -98,6 +98,18 @@ def apply_rotary_pos_emb(q, k, cos, sin, unsqueeze_dim=1):
     return q_embed, k_embed
 
 
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
+
 class TPILlamaAttention(nn.Module):
 
     def __init__(
@@ -105,6 +117,7 @@ class TPILlamaAttention(nn.Module):
         config: LlamaConfig,
         layer_idx: int,
         num_heads: int,
+        num_kv_heads: int,
         head_dim: int
     ):
         super().__init__()
@@ -114,14 +127,17 @@ class TPILlamaAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_heads = num_heads
         self.head_dim = head_dim
+        self.num_key_value_heads = num_kv_heads
+        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         self.is_causal = True
 
         self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias)
+        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
+        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
+
         self.rotary_emb = LlamaRotaryEmbedding(config=self.config)
 
 
@@ -143,14 +159,17 @@ class TPILlamaSdpaAttention(TPILlamaAttention):
         value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
+        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
 
         cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
         key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+
+        key_states = repeat_kv(key_states, self.num_key_value_groups)
+        value_states = repeat_kv(value_states, self.num_key_value_groups)
 
         causal_mask = attention_mask
         causal_mask = causal_mask[:, :, :, : key_states.shape[-2]]
@@ -220,13 +239,19 @@ class TPILlamaDecoderLayer(nn.Module):
                 f"(got `hidden_size`: {self.hidden_size} and `num_heads`: {config.num_attention_heads})."
             )
 
-        heads_per_node = get_heads_per_node(
-            strategy=args.split_strategy,
-            num_attention_heads=config.num_attention_heads,
+        heads_per_node, kv_heads_per_node = get_heads_per_node(
             world_size=args.world_size,
             ratio=args.ratio,
+            num_heads=config.num_attention_heads,
+            num_kv_heads=config.num_key_value_heads
         )
-        self.self_attn = TPILlamaSdpaAttention(config, layer_idx, heads_per_node[rank], head_dim)
+        self.self_attn = TPILlamaSdpaAttention(
+            config=config,
+            layer_idx=layer_idx,
+            num_heads=heads_per_node[rank],
+            num_kv_heads=kv_heads_per_node[rank],
+            head_dim=head_dim,
+        )
 
         split_dims = (np.array(heads_per_node) * config.intermediate_size // sum(heads_per_node)).tolist()
         if sum(split_dims) != config.intermediate_size:
