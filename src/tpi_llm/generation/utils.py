@@ -102,6 +102,8 @@ class TPIGenerationMixin(GenerationMixin):
                 input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
 
                 if streamer is not None:
+                    # the current token will not be printed immediately until the last space char,
+                    # which is a simple heuristic to avoid printing incomplete words.
                     streamer.put(next_tokens.cpu())
 
                 model_kwargs = self._update_model_kwargs_for_generation(outputs, model_kwargs)
@@ -121,7 +123,7 @@ class TPIGenerationMixin(GenerationMixin):
             # for non-master nodes
             unfinished = [torch.ones(1, dtype=torch.long)]
             while unfinished[0].item() == 1.:
-                # run model
+                # assist forward pass to get next token
                 self(**model_kwargs)
                 # retrieve finish status from the master node
                 DistributedCommPrimitive.broadcast(unfinished, src=0)
