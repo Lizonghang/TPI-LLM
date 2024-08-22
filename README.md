@@ -13,7 +13,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 
 # Updates
 * 2024/08/20: Add support for multi-host tensor parallelism.
-* 2024/08/22: Add support for Llama 3 and Llama 3.1.
+* 2024/08/22: Add support for Llama 2, Llama 3 and Llama 3.1.
 
 # Installation
 1. Clone the repository:
@@ -43,9 +43,9 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 
 To get started, you’ll need to download the pretrained model weights from **Hugging Face**:
 
-- **Llama 2 series**, for example, [OpenLM-Research/OpenLlama-2-3B](https://huggingface.co/openlm-research/open_llama_3b_v2)
-- **Llama 3 series**, for example, [Meta/Llama-3-8B](https://huggingface.co/meta-llama/Meta-Llama-3-8B/tree/main)
-- **Llama 3.1 series**, for example, [Meta/Llama-3.1-8B-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct)
+- **Llama 2 series**, for example, [Meta/Llama-2-7b-hf](https://huggingface.co/meta-llama/Llama-2-7b-hf)
+- **Llama 3 series**, for example, [Meta/Llama-3-8b](https://huggingface.co/meta-llama/Meta-Llama-3-8B/tree/main)
+- **Llama 3.1 series**, for example, [Meta/Llama-3.1-8b-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct)
 
 After downloading, save the model files in a directory of your choice, which we’ll refer to as `<PATH-TO-MODEL-FILES>`.
 
