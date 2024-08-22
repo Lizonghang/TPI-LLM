@@ -41,9 +41,14 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 
 **1. Download Pretrained Model Weights**
 
-To get started, you’ll need to download the pretrained model weights from Hugging Face. For example, if you’re 
-using the Llama-2-3B model, you can download the weights manually from [Hugging Face](https://huggingface.co/openlm-research/open_llama_3b_v2). 
+To get started, you’ll need to download the pretrained model weights from **Hugging Face**. For example:
+
+- **Llama-2-3B**: [Download here](https://huggingface.co/openlm-research/open_llama_3b_v2).
+- **Llama-3.1-8B**: [Download here](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct).
+
 After downloading, save the model files in a directory of your choice, which we’ll refer to as `<PATH-TO-MODEL-FILES>`.
+
+
 
 ## Run on Your Laptop
 Run the example script for a trial:
@@ -66,14 +71,18 @@ This will slice the pretrained model weights and save them into subdirectories c
 
 ```commandline
 > ls <PATH-TO-MODEL-FILES>
-|- pytorch_model.bin
 |- config.json
+|- model-00001-of-00004.safetensors
+|- model-00002-of-00004.safetensors
+|- model-00003-of-00004.safetensors
+|- model-00004-of-00004.safetensors
+|- model.safetensors.index.json
 |- ...
 |- split/
-|--- node0
-|--- node1
-|--- node2
-|--- node3
+|--- node_0
+|--- node_1
+|--- node_2
+|--- node_3
 ```
 
 **Subsequent Runs:**
@@ -100,8 +109,7 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
     --model_path <PATH-TO-MODEL-FILES> \
     --length 10 \
     --master_ip <MASTER_ADDR> \
-    --master_port <MASTER_PORT> \
-    --split_bin
+    --master_port <MASTER_PORT>
 
 # On node 2:
 > RANK=2 WORLD_SIZE=4 python examples/run_multihost.py \
@@ -109,8 +117,7 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
     --model_path <PATH-TO-MODEL-FILES> \
     --length 10 \
     --master_ip <MASTER_ADDR> \
-    --master_port <MASTER_PORT> \
-    --split_bin
+    --master_port <MASTER_PORT>
     
 # On node 3:
 > RANK=3 WORLD_SIZE=4 python examples/run_multihost.py \
@@ -118,8 +125,7 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
     --model_path <PATH-TO-MODEL-FILES> \
     --length 10 \
     --master_ip <MASTER_ADDR> \
-    --master_port <MASTER_PORT> \
-    --split_bin
+    --master_port <MASTER_PORT>
 ```
 
 You can set `<MASTER_ADDR>` and `<MASTER_PORT>` of your choice, but make sure that the master node can be accessed 
