@@ -1,7 +1,7 @@
 import os
 import logging
 import torch
-from transformers import LlamaTokenizer, TextStreamer
+from transformers import AutoTokenizer, TextStreamer
 from tpi_llm import TPILlamaForCausalLM
 from tpi_llm.split import split_pretrained_model
 from tpi_llm.modeling_utils import load_model_config
@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 MODEL_CLASSES = {
-    "llama": (TPILlamaForCausalLM, LlamaTokenizer),
+    "llama": (TPILlamaForCausalLM, AutoTokenizer),
 }
 MAX_LENGTH = int(10000)  # Hardcoded max length to avoid infinite loop
 
@@ -49,7 +49,7 @@ def main(my_rank, world_size, args):
         raise KeyError(f"Unsupported model type: {args.model_type}")
 
     # todo: automatically determine ratio
-    args.ratio = None
+    args.ratio = [1./args.world_size] * args.world_size
 
     # split pretrained model files on node with rank 0.
     if my_rank == 0 and args.split_bin:
@@ -59,9 +59,8 @@ def main(my_rank, world_size, args):
 
         split_file_path = os.path.join(args.model_path, args.save_dir)
         split_pretrained_model(
-            args.model_path,
-            world_size,
-            strategy=args.split_strategy,
+            model_path=args.model_path,
+            world_size=world_size,
             ratio=args.ratio,
             save_dir=args.save_dir
         )
@@ -102,5 +101,5 @@ def main(my_rank, world_size, args):
     )
 
     # print recorded memory usage
-    time_str, mem_str = model.mem_manager.memory_history
-    logger.info(f"RANK {my_rank}:\nTimestamp: {time_str} \nMemory usage: {mem_str}")
+    # time_str, mem_str = model.mem_manager.memory_history
+    # logger.info(f"RANK {my_rank}:\nTimestamp: {time_str} \nMemory usage: {mem_str}")
