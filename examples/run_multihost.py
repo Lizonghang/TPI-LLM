@@ -24,7 +24,6 @@ if __name__ == "__main__":
     parser.add_argument("--fp16", action="store_true", help="Whether to use 16-bit mixed precision.")
     parser.add_argument("--split_bin", action="store_true", help="Whether to split the model file.")
     parser.add_argument("--save_dir", type=str, default="split", help="Directory to save split models.")
-    parser.add_argument("--split_strategy", type=str, default="uniform")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--master_ip", type=str, default="127.0.0.1", help="Master IP address.")
     parser.add_argument("--master_port", type=int, default=29500, help="Master port.")
