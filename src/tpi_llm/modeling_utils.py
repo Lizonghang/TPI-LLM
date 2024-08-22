@@ -72,6 +72,7 @@ class TPIPreTrainedModel(PreTrainedModel, TPIGenerationMixin):
 
         try:
             # load the generation configuration.
+            kwargs.pop("args")
             model.generation_config = GenerationConfig.from_pretrained(model_path, **kwargs)
         except OSError:
             logger.warning_once("Generation config file not found, "
