@@ -4,13 +4,6 @@ import torch.distributed as dist
 from run_llama import main
 
 
-def init_process(rank, size, fn, args, backend="gloo"):
-    os.environ["MASTER_ADDR"] = args.master_ip
-    os.environ["MASTER_PORT"] = str(args.master_port)
-    dist.init_process_group(backend, init_method='env://', rank=rank, world_size=size)
-    fn(rank, size, args)
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # necessary arguments
@@ -24,8 +17,6 @@ if __name__ == "__main__":
     parser.add_argument("--split_bin", action="store_true", help="Whether to split the model file.")
     parser.add_argument("--save_dir", type=str, default="split", help="Directory to save split models.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
-    parser.add_argument("--master_ip", type=str, default="127.0.0.1", help="Master IP address.")
-    parser.add_argument("--master_port", type=int, default=29500, help="Master port.")
     # hyperparameters
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--k", type=int, default=0)
@@ -37,6 +28,14 @@ if __name__ == "__main__":
     # retrieve world size and my rank from environment variables
     args.world_size = int(os.environ['WORLD_SIZE'])
     args.rank = int(os.environ['RANK'])
+    args.master_ip = os.environ['MASTER_ADDR']
+    args.master_port = int(os.environ['MASTER_PORT'])
 
     # launch the distributed task
-    init_process(args.rank, args.world_size, main, args)
+    dist.init_process_group(
+        backend="gloo",
+        init_method='env://',
+        rank=args.rank,
+        world_size=args.world_size
+    )
+    main(args.rank, args.world_size, args)
