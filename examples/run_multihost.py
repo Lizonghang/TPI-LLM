@@ -17,6 +17,9 @@ if __name__ == "__main__":
     parser.add_argument("--split_bin", action="store_true", help="Whether to split the model file.")
     parser.add_argument("--save_dir", type=str, default="split", help="Directory to save split models.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
+    # for model synchronization
+    parser.add_argument("--file_port", type=int, default=29600, help="File server port.")
+    parser.add_argument("--force_download", action="store_true", help="Force download sliced model files.")
     # hyperparameters
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--k", type=int, default=0)
@@ -38,4 +41,8 @@ if __name__ == "__main__":
         rank=args.rank,
         world_size=args.world_size
     )
+
     main(args.rank, args.world_size, args)
+
+    # destroy distributed process
+    dist.destroy_process_group()
