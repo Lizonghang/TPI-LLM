@@ -1,7 +1,6 @@
 import os
 import logging
 import torch
-import torch.distributed as dist
 from transformers import AutoTokenizer, TextStreamer
 from tpi_llm import TPILlamaForCausalLM
 from tpi_llm.split import split_pretrained_model
@@ -60,17 +59,14 @@ def main(kvstore, my_rank, world_size, args):
         run_sync_server(args.master_ip, args.file_port, args.model_path, split_file_path)
 
         # ensure that the file download is executed after the master node binds its file port.
-        kvstore.barrier()
-        dist.barrier()
+        kvstore._barrier()
     else:
-        kvstore.barrier()
-        dist.barrier()
+        kvstore._barrier()
         # each node download sliced weight files from the master node.
         if not os.path.exists(split_file_path) or args.force_download:
             os.makedirs(os.path.join(split_file_path, f"node_{my_rank}"), exist_ok=True)
             download_file(args.master_ip, args.file_port, my_rank, split_file_path)
 
-    return  # todo
     # load model configurations
     model_config = load_model_config(args.model_path)
     max_seq_length = model_config.get("max_position_embeddings", 0)
@@ -115,6 +111,7 @@ def main(kvstore, my_rank, world_size, args):
         top_p=args.p,
         do_sample=True,
         streamer=streamer,
+        broadcast_port=args.broadcast_port
     )
 
     # print recorded memory usage

@@ -110,6 +110,9 @@ class TPIGenerationMixin(GenerationMixin):
 
                 # update finish status and synchronize with other nodes
                 unfinished = unfinished & ~stopping_criteria(input_ids, scores)
+                print(model_kwargs)
+                # todo: start a listener
+
                 DistributedCommPrimitive.broadcast([unfinished.cpu()], src=0)
 
                 # This is needed to properly delete outputs.logits which may be very large for first iteration

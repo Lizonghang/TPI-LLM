@@ -1,8 +1,7 @@
 import os
 import logging
 import argparse
-import torch.distributed as dist
-# from mxnet import kv
+from mxnet import kv
 from run_llama import main
 
 logging.basicConfig(
@@ -28,6 +27,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     # for model synchronization
     parser.add_argument("--file_port", type=int, default=29600, help="File server port.")
+    parser.add_argument("--broadcast_port", type=int, default=29700, help="Broadcast server port.")
     parser.add_argument("--force_download", action="store_true", help="Force download sliced model files.")
     # hyperparameters
     parser.add_argument("--temperature", type=float, default=1.0)
@@ -38,29 +38,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # launch kvstore backend
-    # kvstore_dist = kv.create("dist_sync")
-    # args.rank = kvstore_dist.rank
-    # args.world_size = kvstore_dist.num_workers
-    # logger.info(f"KVStore initialized with rank {args.rank} / {args.world_size}")
-
-    # launch torch distributed backend
-    args.master_ip = os.environ["MASTER_ADDR"]
-    args.master_port = int(os.environ["MASTER_PORT"])
+    kvstore_dist = kv.create("dist_sync")
     args.rank = int(os.environ["RANK"])
-    args.world_size = int(os.environ["WORLD_SIZE"])
-    # os.environ["WORLD_SIZE"] = str(args.world_size)
-    # os.environ["RANK"] = str(args.rank)
-    logger.info("call dist.init_process_group")
-    dist.init_process_group(
-        backend="gloo",
-        init_method="env://",
-        rank=args.rank,
-        world_size=args.world_size
-    )
-    logger.info(f"PyTorch distributed initialized with rank {args.rank} / {args.world_size}")
+    args.world_size = kvstore_dist.num_workers
+    logger.info(f"KVStore initialized with rank {args.rank} / {args.world_size}")
 
     # run inference
-    # main(kvstore_dist, args.rank, args.world_size, args)
-
-    dist.barrier()
-    dist.destroy_process_group()
+    main(kvstore_dist, args.rank, args.world_size, args)
