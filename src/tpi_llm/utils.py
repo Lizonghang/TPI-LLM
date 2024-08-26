@@ -28,3 +28,13 @@ OUTPUT_SAVE_PATH = "output.bin"
 INPUT_EMB_KEY = "model.embed_tokens.weight"
 OUTPUT_LAYERNORM_KEY = "model.norm.weight"
 OUTPUT_HEAD_KEY = "lm_head.weight"
+
+FILES_TO_SYNC = (
+    "config.json",
+    "generation_config.json",
+    "special_tokens_map.json",
+    "tokenizer.model",
+    "tokenizer_config.json",
+    "model.safetensors.index.json",
+    "tokenizer.json",
+)
