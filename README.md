@@ -14,6 +14,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 # Updates
 * 2024/08/20: Add support for multi-host tensor parallelism.
 * 2024/08/22: Add support for Llama 2, Llama 3 and Llama 3.1.
+* 2024/08/26: Implement a file server to synchronize sliced model files to other nodes.
 
 # Installation
 1. Clone the repository:
@@ -95,19 +96,19 @@ Assume we have four hosts 0 ~ 3. Run the following command on each of them:
 ```commandline
 # On node 0:
 > RANK=0 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --length 10 --split_bin
+  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600 --length 10 --split_bin
 
 # On node 1:
 > RANK=1 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES>
+  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600
 
 # On node 2:
 > RANK=2 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES>
+  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600
     
 # On node 3:
 > RANK=3 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES>
+  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600
 ```
 
 You can set `<MASTER_ADDR>` and `<MASTER_PORT>` of your choice, but make sure that the master node can be accessed 
@@ -116,6 +117,10 @@ by all other nodes.
 > **NOTE:** Unfortunately, Gloo depends on a specific part of Linux, the current version only supports distributed 
 > between multiple Linux operating system devices. If you have needs for MacOS and Windows operating systems, 
 > please modify the communication backend of PyTorch from Gloo to MPI, which may require some complicated operations.
+
+This will start a file server on the master node 0. Nodes 1 ~ 3 will automatically download their respective 
+model parameter slice files from the master node when needed. To force a re-download of the model parameter 
+slice files, you can use the `--force_download` option.
 
 ## Run on Klonet
 Coming soon.
@@ -135,6 +140,8 @@ Below is a list of these options:
 | `--seed`           | `42`          | `int`   | Random seed for reproducibility.                                       |
 | `--master_ip`      | `"127.0.0.1"` | `str`   | IP address of the master node.                                         |
 | `--master_port`    | `29500`       | `int`   | Port number of the master node.                                        |
+| `--file_port`      | `29600`       | `str`   | Port number on the master node where the file server is bound.         |
+| `--force_download` | `False`       | `bool`  | Force non-master nodes to re-download model parameter slice files.     |
 | `--temperature`    | `1.0`         | `float` | Sampling temperature for text generation.                              |
 | `--k`              | `0`           | `int`   | Number of highest probability tokens to keep for top-k sampling.       |
 | `--p`              | `0.9`         | `float` | Cumulative probability for nucleus sampling (top-p).                   |
