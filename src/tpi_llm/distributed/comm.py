@@ -1,6 +1,7 @@
 import torch
 import torch.distributed as dist
 from typing import List, Union
+from mxnet import nd
 from torch._C._distributed_c10d import ReduceOp
 
 
@@ -28,7 +29,8 @@ class DistributedCommPrimitive:
         cls,
         tensor: torch.Tensor,
         op: ReduceOp = ReduceOp.SUM,
-        async_op=False
+        async_op: bool = False,
+        use_kvstore: bool = False
     ) -> Union[dist.distributed_c10d.Work, None]:
         """
         Reduce the tensor data across all nodes such that all nodes obtain the reduced tensor.
@@ -38,10 +40,32 @@ class DistributedCommPrimitive:
             tensor (torch.Tensor): The tensor to be reduced.
             op (ReduceOp, optional): The reduction operation to be applied. Defaults to ReduceOp.SUM.
             async_op (bool, optional): If True, the operation will be performed asynchronously, and a
-            `dist.distributed_c10d.Work` object will be returned (default is False).
+                `dist.distributed_c10d.Work` object will be returned (default is False).
+            use_kvstore (bool, optional): If True, the tensor will be handled using MXNET / NetStorm
+                KVStore.
 
         Returns:
             Union[dist.distributed_c10d.Work, None]: Returns a `Work` object if `async_op` is True;
             otherwise, returns None.
         """
-        return dist.all_reduce(tensor, op=op, async_op=async_op)
+        # use torch.distributed to perform allreduce
+        if not use_kvstore:
+            return dist.all_reduce(tensor, op=op, async_op=async_op)
+
+        # use kvstore to perform allreduce
+        # todo: convert torch.Tensor to nd.NDArray and convert it back after allreduce
+        pass
+
+        # for idx, param in enumerate(params):  # idex=模型的层号
+        #     if param.grad_req == "null":
+        #         continue
+        #     kvstore_dist.push(idx, param.grad() / num_samples, priority=-idx)
+        #
+        # for idx, param in enumerate(params):
+        #     if param.grad_req == "null":
+        #         continue
+        #     temp = nd.zeros(param.shape, ctx=ctx)
+        #     kvstore_dist.pull(idx, temp, priority=-idx)
+        #     temp.wait_to_read()
+        #     param.grad()[:] = temp
+        # nd.waitall()

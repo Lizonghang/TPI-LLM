@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from torch import nn
 from typing import Optional, Union, Tuple
+from mxnet.kvstore import KVStore
 from transformers.models.llama import LlamaPreTrainedModel, LlamaForCausalLM, LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaRotaryEmbedding
 from transformers import Cache
@@ -221,6 +222,7 @@ class TPILlamaDecoderLayer(nn.Module):
         self,
         config: LlamaConfig,
         layer_idx: int,
+        kvstore: KVStore,
         rank: int,
         mem_manager: MemoryManager,
         args: argparse.Namespace
@@ -228,6 +230,7 @@ class TPILlamaDecoderLayer(nn.Module):
         super().__init__()
         self.config = config
         self.layer_idx = layer_idx
+        self.kvstore = kvstore
         self.rank = rank
         self.mem_manager = mem_manager
 
@@ -291,7 +294,7 @@ class TPILlamaDecoderLayer(nn.Module):
         )
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        comm_handler = DistributedCommPrimitive.allreduce(hidden_states, async_op=True)
+        comm_handler = DistributedCommPrimitive.allreduce(hidden_states, async_op=True)  # todo: change to kvstore
         self.mem_manager.track(f"mlp.{self.layer_idx}")
         comm_handler.wait()
 
@@ -303,7 +306,7 @@ class TPILlamaDecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states)
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        comm_handler = DistributedCommPrimitive.allreduce(hidden_states, async_op=True)
+        comm_handler = DistributedCommPrimitive.allreduce(hidden_states, async_op=True)  # todo: change to kvstore
         self.mem_manager.track(f"self_attn.{self.layer_idx + 1}")
         comm_handler.wait()
 
@@ -326,6 +329,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
     def __init__(
         self,
         config: LlamaConfig,
+        kvstore: KVStore,
         rank: int,
         mem_manager: MemoryManager,
         args: argparse.Namespace
@@ -338,7 +342,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList([
-            TPILlamaDecoderLayer(config, layer_idx, rank, mem_manager, args)
+            TPILlamaDecoderLayer(config, layer_idx, kvstore, rank, mem_manager, args)
             for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -405,7 +409,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         # shape of cache_position: (seq_len,)
         # shape of causal_mask: (1, 1, seq_len, seq_len)
         broadcast_data = [inputs_embeds, position_embeddings, cache_position, causal_mask]
-        DistributedCommPrimitive.broadcast(broadcast_data, src=0)
+        DistributedCommPrimitive.broadcast(broadcast_data, src=0)  # broadcast by torch.distributed
         inputs_embeds, position_embeddings, cache_position, causal_mask = broadcast_data
 
         # decoder layers
@@ -449,13 +453,14 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
     def __init__(
         self,
         config: LlamaConfig,
+        kvstore: KVStore,
         rank: int,
         args: argparse.Namespace
     ):
         super().__init__(config)
         self.rank = rank
         self.mem_manager = MemoryManager(self, rank, args)
-        self.model = TPILlamaModel(config, rank, self.mem_manager, args)
+        self.model = TPILlamaModel(config, kvstore, rank, self.mem_manager, args)
 
     def forward(
         self,

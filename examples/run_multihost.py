@@ -1,7 +1,16 @@
 import os
+import logging
 import argparse
 import torch.distributed as dist
+# from mxnet import kv
 from run_llama import main
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 
 if __name__ == "__main__":
@@ -28,21 +37,30 @@ if __name__ == "__main__":
                         help="Memory window size, should be at least 2.")
     args = parser.parse_args()
 
-    # retrieve world size and my rank from environment variables
-    args.world_size = int(os.environ['WORLD_SIZE'])
-    args.rank = int(os.environ['RANK'])
-    args.master_ip = os.environ['MASTER_ADDR']
-    args.master_port = int(os.environ['MASTER_PORT'])
+    # launch kvstore backend
+    # kvstore_dist = kv.create("dist_sync")
+    # args.rank = kvstore_dist.rank
+    # args.world_size = kvstore_dist.num_workers
+    # logger.info(f"KVStore initialized with rank {args.rank} / {args.world_size}")
 
-    # launch the distributed task
+    # launch torch distributed backend
+    args.master_ip = os.environ["MASTER_ADDR"]
+    args.master_port = int(os.environ["MASTER_PORT"])
+    args.rank = int(os.environ["RANK"])
+    args.world_size = int(os.environ["WORLD_SIZE"])
+    # os.environ["WORLD_SIZE"] = str(args.world_size)
+    # os.environ["RANK"] = str(args.rank)
+    logger.info("call dist.init_process_group")
     dist.init_process_group(
         backend="gloo",
-        init_method='env://',
+        init_method="env://",
         rank=args.rank,
         world_size=args.world_size
     )
+    logger.info(f"PyTorch distributed initialized with rank {args.rank} / {args.world_size}")
 
-    main(args.rank, args.world_size, args)
+    # run inference
+    # main(kvstore_dist, args.rank, args.world_size, args)
 
-    # destroy distributed process
+    dist.barrier()
     dist.destroy_process_group()

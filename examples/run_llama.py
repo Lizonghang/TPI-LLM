@@ -32,7 +32,7 @@ def adjust_length_to_model(length, max_sequence_length):
     return length
 
 
-def main(my_rank, world_size, args):
+def main(kvstore, my_rank, world_size, args):
     # set random seeds
     torch.manual_seed(args.seed)
     if args.use_gpu:
@@ -54,20 +54,23 @@ def main(my_rank, world_size, args):
                 ratio=args.ratio,
                 save_dir=args.save_dir
             )
-            logger.info(f"All weights are splitted and saved to {split_file_path}.")
+            logger.info(f"All weights are split and saved to {split_file_path}.")
 
         # wait for other nodes to download sliced files.
         run_sync_server(args.master_ip, args.file_port, args.model_path, split_file_path)
 
         # ensure that the file download is executed after the master node binds its file port.
+        kvstore.barrier()
         dist.barrier()
     else:
+        kvstore.barrier()
         dist.barrier()
         # each node download sliced weight files from the master node.
         if not os.path.exists(split_file_path) or args.force_download:
             os.makedirs(os.path.join(split_file_path, f"node_{my_rank}"), exist_ok=True)
             download_file(args.master_ip, args.file_port, my_rank, split_file_path)
 
+    return  # todo
     # load model configurations
     model_config = load_model_config(args.model_path)
     max_seq_length = model_config.get("max_position_embeddings", 0)
@@ -101,7 +104,7 @@ def main(my_rank, world_size, args):
         ).to(args.device)
 
     # load model and run tensor-parallelism inference
-    model = model_class.from_pretrained(args.model_path, rank=my_rank, args=args)
+    model = model_class.from_pretrained(args.model_path, kvstore=kvstore, rank=my_rank, args=args)
 
     # run generate with streaming output
     model.generate(
