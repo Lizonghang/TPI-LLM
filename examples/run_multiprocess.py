@@ -28,6 +28,9 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
     parser.add_argument("--master_ip", type=str, default="127.0.0.1", help="Master IP address.")
     parser.add_argument("--master_port", type=int, default=29500, help="Master port.")
+    # for model synchronization
+    parser.add_argument("--file_port", type=int, default=29600, help="File server port.")
+    parser.add_argument("--force_download", action="store_true", help="Force download sliced model files.")
     # hyperparameters
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--k", type=int, default=0)
