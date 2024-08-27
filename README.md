@@ -47,6 +47,11 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 > (tpi-llm) pip install mxnet==1.9.1
 ```
 
+> WARNING: On macOS, the pre-built MXNet binaries do not have the KVSTORE module enabled by default.
+> To use `dist_sync`, you should compile MXNET from source with `USE_DIST_KVSTORE=1` enabled.
+> To build MXNET from source, following [this guidance](https://mxnet.apache.org/get_started/build_from_source).
+
+
 ## Using Pre-built Docker Image
 We have provided Docker images for TPI-LLM, available on [Docker Hub](https://hub.docker.com/repository/docker/lizonghango00o1/tpi-llm/general). 
 This is the easiest way to get started, as it includes all dependencies pre-installed.
