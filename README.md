@@ -48,7 +48,7 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 
 # How to Use?
 
-**1. Download Pretrained Model Weights**
+## Download Pretrained Model Weights
 
 To get started, you’ll need to download the pretrained model weights from **Hugging Face**:
 
