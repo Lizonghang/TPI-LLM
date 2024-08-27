@@ -18,6 +18,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 * 2024/08/27: Add the MXNET KVSTORE backend.
 
 # Installation
+## Use the Source Code
 1. Clone the repository:
 ```commandline
 > git clone https://github.com/Lizonghang/TPI-LLM
@@ -44,6 +45,26 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 # To install NETSTORM, please see: https://github.com/fengwenjiao/netstorm
 # To install MXNET:
 > (tpi-llm) pip install mxnet==1.9.1
+```
+
+## Using Pre-built Docker Image
+We have provided Docker images for TPI-LLM, available on [Docker Hub](https://hub.docker.com/repository/docker/lizonghango00o1/tpi-llm/general). 
+This is the easiest way to get started, as it includes all dependencies pre-installed.
+
+```commandline
+> docker run -dit --name master lizonghango00o1/tpi-llm:1.0.1.mx
+```
+
+If this is a master node, use `docker cp <HOST_MODEL_PATH> master:/root/TPI-LLM/` to copy the pretrained model files
+to the container of the master node.
+
+## Build from Dockerfile
+If you prefer to build the Docker image yourself, you can modify and use the provided 
+[Dockerfile](https://github.com/Lizonghang/TPI-LLM/blob/tpi-mx/Dockerfile) in our repo.
+
+```commandline
+> docker build -t tpi-llm:local .
+> docker run -dit --name master tpi-llm:local
 ```
 
 # How to Use?
