@@ -15,6 +15,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 * 2024/08/20: Add support for multi-host tensor parallelism.
 * 2024/08/22: Add support for Llama 2, Llama 3 and Llama 3.1.
 * 2024/08/26: Implement a file server to synchronize sliced model files to other nodes.
+* 2024/08/27: Add the MXNET KVSTORE backend.
 
 # Installation
 1. Clone the repository:
@@ -38,6 +39,13 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 (tpi-llm) > pip install -r requirements.txt
 ```
 
+4. Install MXNET or NETSTORM:
+```commandline
+# To install NETSTORM, please see: https://github.com/fengwenjiao/netstorm
+# To install MXNET:
+> (tpi-llm) pip install mxnet==1.9.1
+```
+
 # How to Use?
 
 **1. Download Pretrained Model Weights**
@@ -50,23 +58,48 @@ To get started, you’ll need to download the pretrained model weights from **Hu
 
 After downloading, save the model files in a directory of your choice, which we’ll refer to as `<PATH-TO-MODEL-FILES>`.
 
-## Run on Your Laptop
-Run the example script for a trial:
-```commandline
-> python examples/run_multiprocess.py \
-    --model_type llama \
-    --model_path <PATH-TO-MODEL-FILES> \
-    --world_size 4 \
-    --length 10 \
-    --split_bin
+## Run on Multiple Hosts
+Assume we have 3 hosts, where we will run a scheduler and a server on host 1, and run 2 worker nodes on the 
+other 2 hosts, respectively. Suppose their IP addresses are:
+
+```text
+IP of host 1: X.X.X.1 (scheduler and server)
+IP of host 2: X.X.X.2 (master node)
+IP of host 3: X.X.X.3
 ```
-This command will run 4 processes on a single machine, creating a pseudo-distributed environment that leverages 
-tensor parallelism for Llama inference.
 
-**First-Time Setup:**
+> It is ok to run the scheduler, (parameter) server, and master node on the same host.
 
-If this is your first time running the script, make sure to include the <code>--split_bin</code> option. 
-This will slice the pretrained model weights and save them into subdirectories corresponding to the 4 nodes:
+The scheduler and server are used by KVSTORE to perform allreduce across the master node and the other worker 
+nodes. The master node is regarded as the task publisher, who initiates the input prompt and display output
+test stream to users, at the meantime it will slice the pretrained model weight files and serve as a file
+server to send the sliced model weights to other worker nodes.
+
+**Step 1**: To launch the scheduler and server, run the following commands on host 1:
+```commandline
+# Run the scheduler on host 1 (IP: X.X.X.1):
+> DMLC_ROLE=scheduler DMLC_PS_ROOT_URI=X.X.X.1 DMLC_PS_ROOT_PORT=29500 DMLC_NUM_WORKER=2 DMLC_NUM_SERVER=1 python -c "import mxnet"
+
+# Run the server on host 1 (IP: X.X.X.1):
+> DMLC_ROLE=server DMLC_PS_ROOT_URI=X.X.X.1 DMLC_PS_ROOT_PORT=29500 DMLC_NUM_WORKER=2 DMLC_NUM_SERVER=1 python -c "import mxnet"
+```
+
+**Step 2:** To launch the master node, run the following command on host 2:
+```commandline
+# Run the master node on host 2 (IP: X.X.X.2, RANK = 0)
+> DMLC_ROLE=worker DMLC_PS_ROOT_URI=X.X.X.1 DMLC_PS_ROOT_PORT=29500 DMLC_NUM_WORKER=2 DMLC_NUM_SERVER=1 \
+    RANK=0 MASTER_ADDR=X.X.X.2 python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> 
+```
+
+> **NOTE:** Please make sure that the scheduler, server, and master node can be accessed by all other nodes.
+
+> **NOTE:** The master node also participate in tensor-parallelism computing.
+
+_First-Time Setup:_
+
+If this is your first time running the task, the master node will automatically slice the pretrained model weight 
+files. Suppose we have 4 worker nodes (including the master node), the sliced model weight files should be like 
+the following:
 
 
 ```commandline
@@ -85,42 +118,20 @@ This will slice the pretrained model weights and save them into subdirectories c
 |--- node_3
 ```
 
-**Subsequent Runs:**
+_Subsequent Runs:_
 
-For subsequent runs, you can omit the <code>--split_bin</code> option, as the model weights will already be sliced 
-and saved in the respective node directories.
+For subsequent runs, the sliced model weight files can be reused. Or you can include the `--split_bin` option 
+to re-split it.
 
-## Run on Multiple Hosts
-Assume we have four hosts 0 ~ 3. Run the following command on each of them:
-
+**Step 3**: To launch other worker nodes, use the following command on other hosts (e.g., host 3):
 ```commandline
-# On node 0:
-> RANK=0 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600 --length 10 --split_bin
-
-# On node 1:
-> RANK=1 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600
-
-# On node 2:
-> RANK=2 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600
-    
-# On node 3:
-> RANK=3 WORLD_SIZE=4 MASTER_ADDR=<RANK_0_IP> MASTER_PORT=29500 \
-  python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES> --file_port 29600
+# Run the worker node on host 3 (IP: X.X.X.3, RANK > 0)
+> DMLC_ROLE=worker DMLC_PS_ROOT_URI=X.X.X.1 DMLC_PS_ROOT_PORT=29500 DMLC_NUM_WORKER=2 DMLC_NUM_SERVER=1 \
+    RANK=1 MASTER_ADDR=X.X.X.2 python examples/run_multihost.py --model_type llama --model_path <PATH-TO-MODEL-FILES>
 ```
 
-You can set `<MASTER_ADDR>` and `<MASTER_PORT>` of your choice, but make sure that the master node can be accessed 
-by all other nodes.
-
-> **NOTE:** Unfortunately, Gloo depends on a specific part of Linux, the current version only supports distributed 
-> between multiple Linux operating system devices. If you have needs for MacOS and Windows operating systems, 
-> please modify the communication backend of PyTorch from Gloo to MPI, which may require some complicated operations.
-
-This will start a file server on the master node 0. Nodes 1 ~ 3 will automatically download their respective 
-model parameter slice files from the master node when needed. To force a re-download of the model parameter 
-slice files, you can use the `--force_download` option.
+The worker nodes will automatically download their model weight slices from the master node. If you have downloaded
+the slices before, you can use the `--force_download` option to force a re-download.
 
 ## Run on Klonet
 Coming soon.
@@ -129,20 +140,19 @@ Coming soon.
 TPI-LLM provides several optional parameters that you can customize to control various aspects of the inference process. 
 Below is a list of these options:
 
-| Argument           | Default       | Type    | Description                                                            |
-|--------------------|---------------|---------|------------------------------------------------------------------------|
-| `--prompt`         | `""`          | `str`   | The input prompt.                                                      |
-| `--length`         | `20`          | `int`   | Maximum length of the generated sequence.                              |
-| `--prefix`         | `""`          | `str`   | Text added prior to input for context.                                 |
-| `--use_gpu`        | `False`       | `bool`  | Whether to use GPU for inference. If false, use CPU by default.        |
-| `--split_bin`      | `False`       | `bool`  | Split the pretrained model file.                                       |
-| `--save_dir`       | `"split"`     | `str`   | The directory to save split model files.                               |
-| `--seed`           | `42`          | `int`   | Random seed for reproducibility.                                       |
-| `--master_ip`      | `"127.0.0.1"` | `str`   | IP address of the master node.                                         |
-| `--master_port`    | `29500`       | `int`   | Port number of the master node.                                        |
-| `--file_port`      | `29600`       | `str`   | Port number on the master node where the file server is bound.         |
-| `--force_download` | `False`       | `bool`  | Force non-master nodes to re-download model parameter slice files.     |
-| `--temperature`    | `1.0`         | `float` | Sampling temperature for text generation.                              |
-| `--k`              | `0`           | `int`   | Number of highest probability tokens to keep for top-k sampling.       |
-| `--p`              | `0.9`         | `float` | Cumulative probability for nucleus sampling (top-p).                   |
-| `--memory_window`  | `2`           | `int`   | Size of the memory window used during inference. Should be at least 2. |
+| Argument           | Default   | Type    | Description                                                                                          |
+|--------------------|-----------|---------|------------------------------------------------------------------------------------------------------|
+| `--prompt`         | `""`      | `str`   | The input prompt.                                                                                    |
+| `--length`         | `20`      | `int`   | Maximum length of the generated sequence.                                                            |
+| `--prefix`         | `""`      | `str`   | Text added prior to input for context.                                                               |
+| `--use_gpu`        | `False`   | `bool`  | Whether to use GPU for inference. If false, use CPU by default.                                      |
+| `--split_bin`      | `False`   | `bool`  | Split the pretrained model file. (available only on the master node)                                 |
+| `--save_dir`       | `"split"` | `str`   | The directory to save split model files.                                                             |
+| `--seed`           | `42`      | `int`   | Random seed for reproducibility.                                                                     |
+| `--file_port`      | `29600`   | `int`   | Port number on the master node where the file server is listening on.                                |
+| `--broadcast_port` | `29700`   | `int`   | Port number on the master node where auxiliary information is listening on.                          |
+| `--force_download` | `False`   | `bool`  | Force worker nodes to re-download model weight slices. (available only on the non-master node)       |
+| `--temperature`    | `1.0`     | `float` | Sampling temperature for text generation. (available only on the master node)                        |
+| `--k`              | `0`       | `int`   | Number of highest probability tokens to keep for top-k sampling. (available only on the master node) |
+| `--p`              | `0.9`     | `float` | Cumulative probability for nucleus sampling (top-p). (available only on the master node)             |
+| `--memory_window`  | `2`       | `int`   | Size of the memory window used during inference. Should be at least 2.                               |

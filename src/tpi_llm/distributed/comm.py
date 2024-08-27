@@ -1,71 +1,95 @@
+import socket
+import pickle
 import torch
-import torch.distributed as dist
-from typing import List, Union
+import mxnet as mx
 from mxnet import nd
-from torch._C._distributed_c10d import ReduceOp
+from mxnet.kvstore import KVStore
 
 
-class DistributedCommPrimitive:
+def server_broadcast(broadcast_data, master_ip, broadcast_port, world_size, kvstore):
+    """
+    The master node broadcasts data to all other nodes.
 
-    def __init__(self, rank, world_size):
-        self.rank = rank
-        self.world_size = world_size
+    Args:
+        broadcast_data (any): The data to broadcast.
+        master_ip (str): The IP address of the master node.
+        broadcast_port (int): The port on which the master node will listen for connections.
+        world_size (int): The total number of nodes.
+        kvstore (KVStore): A key-value store object for managing synchronization between nodes.
+    """
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # set SO_REUSEADDR to release the socket immediately after the socket is closed
+    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    server_socket.bind((master_ip, broadcast_port))
+    server_socket.listen(world_size - 1)  # listen for all other nodes
+    kvstore._barrier()  # make sure the master node starts listening before other nodes connect
 
-    # todo(lizh): optimize the communication efficiency
-    @classmethod
-    def broadcast(cls, object_list: List[object], src: int):
-        """
-        Broadcast a list of objects from the source node to all other nodes.
+    def _handle_client(client_socket):
+        client_socket.sendall(pickle.dumps(broadcast_data))
+        client_socket.close()
 
-        Args:
-            object_list (List[object]): A list of objects to be broadcasted from the source node.
-            src (int): The rank of the source node.
-        """
-        dist.broadcast_object_list(object_list, src=src)
+    connected_clients = 0
+    while connected_clients < world_size - 1:
+        client_socket, _ = server_socket.accept()
+        _handle_client(client_socket)
+        connected_clients += 1
+    server_socket.close()
 
-    # todo(lizh): optimize the communication efficiency
-    @classmethod
-    def allreduce(
-        cls,
-        tensor: torch.Tensor,
-        op: ReduceOp = ReduceOp.SUM,
-        async_op: bool = False,
-        use_kvstore: bool = False
-    ) -> Union[dist.distributed_c10d.Work, None]:
-        """
-        Reduce the tensor data across all nodes such that all nodes obtain the reduced tensor.
-        By default, it performs a sum reduction.
 
-        Args:
-            tensor (torch.Tensor): The tensor to be reduced.
-            op (ReduceOp, optional): The reduction operation to be applied. Defaults to ReduceOp.SUM.
-            async_op (bool, optional): If True, the operation will be performed asynchronously, and a
-                `dist.distributed_c10d.Work` object will be returned (default is False).
-            use_kvstore (bool, optional): If True, the tensor will be handled using MXNET / NetStorm
-                KVStore.
+def client_request(master_ip, broadcast_port, kvstore):
+    """
+    Non-master nodes request and receive data from the master node.
 
-        Returns:
-            Union[dist.distributed_c10d.Work, None]: Returns a `Work` object if `async_op` is True;
-            otherwise, returns None.
-        """
-        # use torch.distributed to perform allreduce
-        if not use_kvstore:
-            return dist.all_reduce(tensor, op=op, async_op=async_op)
+    Args:
+        master_ip (str): The IP address of the master node.
+        broadcast_port (int): The port on which the master node is listening for connections.
+        kvstore (KVStore): A key-value store object for managing synchronization between nodes.
 
-        # use kvstore to perform allreduce
-        # todo: convert torch.Tensor to nd.NDArray and convert it back after allreduce
-        pass
+    Returns:
+        broadcast_data: The broadcast data received from the master node.
+    """
+    kvstore._barrier()  # make sure the master node starts listening before other nodes connect
+    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client_socket.connect((master_ip, broadcast_port))
 
-        # for idx, param in enumerate(params):  # idex=模型的层号
-        #     if param.grad_req == "null":
-        #         continue
-        #     kvstore_dist.push(idx, param.grad() / num_samples, priority=-idx)
-        #
-        # for idx, param in enumerate(params):
-        #     if param.grad_req == "null":
-        #         continue
-        #     temp = nd.zeros(param.shape, ctx=ctx)
-        #     kvstore_dist.pull(idx, temp, priority=-idx)
-        #     temp.wait_to_read()
-        #     param.grad()[:] = temp
-        # nd.waitall()
+    # receive the data in chunks from the master node
+    data = b""
+    while True:
+        packet = client_socket.recv(4096)
+        if not packet:
+            break
+        data += packet
+    client_socket.close()
+
+    broadcast_data = pickle.loads(data)
+    return broadcast_data
+
+
+def allreduce(kvstore: KVStore, tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Perform an allreduce operation using KVStore on a PyTorch tensor across distributed nodes.
+
+    Args:
+        kvstore (KVStore): The key-value store object for distributed communication.
+        tensor (torch.Tensor): The tensor to be all-reduced across nodes.
+
+    Returns:
+        torch.Tensor: The reduced tensor, synchronized across all nodes.
+    """
+    # convert torch.Tensor to a DLPack tensor and then to an MXNet NDArray
+    tensor_np = tensor.detach().cpu().numpy()
+    tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
+
+    # perform allreduce
+    key = "preload_hidden_states" if tensor.size(1) > 1 else "decode_hidden_states"
+    try:
+        kvstore.push(key, tensor_nd)
+        kvstore.pull(key, out=tensor_nd)
+    except mx.base.MXNetError:  # the key may not be initialized
+        kvstore.init(key, nd.zeros_like(tensor_nd))  # only kv.rank 0 will execute initialization
+        kvstore._barrier()  # make sure kvstore init is complete before retrying
+        kvstore.push(key, tensor_nd)
+        kvstore.pull(key, out=tensor_nd)
+
+    # convert the reduced MXNet NDArray back to a PyTorch tensor
+    return torch.from_numpy(tensor_nd.asnumpy()).to(tensor.device)

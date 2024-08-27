@@ -9,7 +9,7 @@ from transformers import (
     StoppingCriteriaList,
     DynamicCache,
 )
-from ..distributed import DistributedCommPrimitive
+from ..distributed import server_broadcast, client_request
 
 
 class TPIGenerationMixin(GenerationMixin):
@@ -110,10 +110,13 @@ class TPIGenerationMixin(GenerationMixin):
 
                 # update finish status and synchronize with other nodes
                 unfinished = unfinished & ~stopping_criteria(input_ids, scores)
-                print(model_kwargs)
-                # todo: start a listener
-
-                DistributedCommPrimitive.broadcast([unfinished.cpu()], src=0)
+                server_broadcast(
+                    broadcast_data=int(unfinished.cpu()),
+                    master_ip=self.args.master_ip,
+                    broadcast_port=self.args.broadcast_port,
+                    world_size=self.args.world_size,
+                    kvstore=self.kvstore
+                )
 
                 # This is needed to properly delete outputs.logits which may be very large for first iteration
                 # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
@@ -124,12 +127,16 @@ class TPIGenerationMixin(GenerationMixin):
             return input_ids
         else:
             # for non-master nodes
-            unfinished = [torch.ones(1, dtype=torch.long)]
-            while unfinished[0].item() == 1.:
+            unfinished = 1
+            while unfinished == 1:
                 # assist forward pass to get next token
                 self(**model_kwargs)
                 # retrieve finish status from the master node
-                DistributedCommPrimitive.broadcast(unfinished, src=0)
+                unfinished = client_request(
+                    master_ip=self.args.master_ip,
+                    broadcast_port=self.args.broadcast_port,
+                    kvstore=self.kvstore
+                )
 
     def _validate_input(self, input_tensor):
         """

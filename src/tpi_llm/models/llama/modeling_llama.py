@@ -12,7 +12,7 @@ from transformers.activations import ACT2FN
 from ...modeling_utils import TPIPreTrainedModel
 from ...memory import MemoryManager
 from ...split import get_heads_per_node
-from ...distributed import DistributedCommPrimitive
+from ...distributed import server_broadcast, client_request, allreduce
 
 
 def _prepare_4d_causal_attention_mask_with_cache_position(
@@ -294,9 +294,8 @@ class TPILlamaDecoderLayer(nn.Module):
         )
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        comm_handler = DistributedCommPrimitive.allreduce(hidden_states, async_op=True)  # todo: change to kvstore
-        self.mem_manager.track(f"mlp.{self.layer_idx}")
-        comm_handler.wait()
+        hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
+        self.mem_manager.track(f"mlp.{self.layer_idx}")  # todo: realize async scheduling?
 
         hidden_states = residual + hidden_states
 
@@ -306,9 +305,8 @@ class TPILlamaDecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states)
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        comm_handler = DistributedCommPrimitive.allreduce(hidden_states, async_op=True)  # todo: change to kvstore
-        self.mem_manager.track(f"self_attn.{self.layer_idx + 1}")
-        comm_handler.wait()
+        hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
+        self.mem_manager.track(f"self_attn.{self.layer_idx + 1}")  # todo: realize async scheduling?
 
         hidden_states = residual + hidden_states
 
@@ -335,10 +333,14 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         args: argparse.Namespace
     ):
         super().__init__(config)
+        self.kvstore = kvstore
         self.rank = rank
         self.mem_manager = mem_manager
         self.padding_idx = config.pad_token_id
         self.vocab_size = config.vocab_size
+        self.master_ip = args.master_ip
+        self.broadcast_port = args.broadcast_port
+        self.world_size = args.world_size
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList([
@@ -390,9 +392,6 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
-        inputs_embeds = None
-        position_embeddings = None
-        causal_mask = None
         if self.rank == 0:
             # notify the memory manager to load input embedding weights.
             self.mem_manager.track("input")
@@ -402,15 +401,17 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
             causal_mask = self._update_causal_mask(
                 attention_mask, inputs_embeds, cache_position, past_key_values)
 
-        # the master node broadcasts inputs_embeds, position_embedding, cache_position,
-        # and causal_mask to all other nodes.
-        # shape of inputs_embeds: (bs, seq_len, hidden_size)
-        # shape of position_embeddings: 2 Tuples of shape (bs, seq_len, head_dim)
-        # shape of cache_position: (seq_len,)
-        # shape of causal_mask: (1, 1, seq_len, seq_len)
-        broadcast_data = [inputs_embeds, position_embeddings, cache_position, causal_mask]
-        DistributedCommPrimitive.broadcast(broadcast_data, src=0)  # broadcast by torch.distributed
-        inputs_embeds, position_embeddings, cache_position, causal_mask = broadcast_data
+            # the master node broadcasts inputs_embeds, position_embedding, cache_position,
+            # and causal_mask to all other nodes.
+            # shape of inputs_embeds: (bs, seq_len, hidden_size)
+            # shape of position_embeddings: 2 Tuples of shape (bs, seq_len, head_dim)
+            # shape of cache_position: (seq_len,)
+            # shape of causal_mask: (1, 1, seq_len, seq_len)
+            broadcast_data = [inputs_embeds, position_embeddings, cache_position, causal_mask]
+            server_broadcast(broadcast_data, self.master_ip, self.broadcast_port, self.world_size, self.kvstore)
+        else:
+            broadcast_data = client_request(self.master_ip, self.broadcast_port, self.kvstore)
+            inputs_embeds, position_embeddings, cache_position, causal_mask = broadcast_data
 
         # decoder layers
         next_decoder_cache = None
@@ -458,9 +459,11 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         args: argparse.Namespace
     ):
         super().__init__(config)
+        self.kvstore = kvstore
         self.rank = rank
         self.mem_manager = MemoryManager(self, rank, args)
         self.model = TPILlamaModel(config, kvstore, rank, self.mem_manager, args)
+        self.args = args
 
     def forward(
         self,

@@ -1,6 +1,7 @@
 import os
 import logging
 import torch
+from mxnet import nd
 from transformers import AutoTokenizer, TextStreamer
 from tpi_llm import TPILlamaForCausalLM
 from tpi_llm.split import split_pretrained_model
@@ -65,7 +66,7 @@ def main(kvstore, my_rank, world_size, args):
         # each node download sliced weight files from the master node.
         if not os.path.exists(split_file_path) or args.force_download:
             os.makedirs(os.path.join(split_file_path, f"node_{my_rank}"), exist_ok=True)
-            download_file(args.master_ip, args.file_port, my_rank, split_file_path)
+            download_file(args.master_ip, args.file_port, my_rank, args.model_path, split_file_path)
 
     # load model configurations
     model_config = load_model_config(args.model_path)
@@ -74,7 +75,7 @@ def main(kvstore, my_rank, world_size, args):
     args.device = "cuda" if args.use_gpu else "cpu"
     args.rank = my_rank
     assert args.memory_window >= 2, "Memory window should be larger than 10."
-    logger.info(f"My rank is {my_rank}, running on device {args.device}.")
+    logger.info(f"My rank is {my_rank}, totally {world_size} nodes.")
 
     try:
         args.model_type = args.model_type.lower()
@@ -100,7 +101,7 @@ def main(kvstore, my_rank, world_size, args):
         ).to(args.device)
 
     # load model and run tensor-parallelism inference
-    model = model_class.from_pretrained(args.model_path, kvstore=kvstore, rank=my_rank, args=args)
+    model = model_class.from_pretrained(args.model_path, kvstore, rank=my_rank, args=args)
 
     # run generate with streaming output
     model.generate(
@@ -110,8 +111,7 @@ def main(kvstore, my_rank, world_size, args):
         top_k=args.k,
         top_p=args.p,
         do_sample=True,
-        streamer=streamer,
-        broadcast_port=args.broadcast_port
+        streamer=streamer
     )
 
     # print recorded memory usage

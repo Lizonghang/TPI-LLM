@@ -38,10 +38,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     # launch kvstore backend
-    kvstore_dist = kv.create("dist_sync")
+    kvstore = kv.create("dist_sync")
     args.rank = int(os.environ["RANK"])
-    args.world_size = kvstore_dist.num_workers
-    logger.info(f"KVStore initialized with rank {args.rank} / {args.world_size}")
+    args.world_size = kvstore.num_workers
+    args.master_ip = os.environ["MASTER_ADDR"]
 
     # run inference
-    main(kvstore_dist, args.rank, args.world_size, args)
+    main(kvstore, args.rank, args.world_size, args)
