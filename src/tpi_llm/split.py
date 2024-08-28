@@ -77,8 +77,11 @@ def get_heads_per_node(world_size, ratio, num_heads=None, num_kv_heads=None):
             heads_per_node_[i % world_size] += 1 if difference_ > 0 else -1
         return heads_per_node_
 
-    heads_per_node = _allocate_heads(num_heads) if num_heads is not None else []
     kv_heads_per_node = _allocate_heads(num_kv_heads) if num_kv_heads is not None else []
+    num_key_value_groups, remainder = divmod(num_heads, num_kv_heads)
+    if remainder != 0:
+        raise ValueError("The value of num_heads is not divisible by num_kv_heads.")
+    heads_per_node = [h * num_key_value_groups for h in kv_heads_per_node]
 
     validate_heads_per_node(heads_per_node, num_heads)
     validate_heads_per_node(kv_heads_per_node, num_kv_heads)
