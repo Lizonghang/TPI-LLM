@@ -1,7 +1,6 @@
 import os
 import logging
 import torch
-from mxnet import nd
 from transformers import AutoTokenizer, TextStreamer
 from tpi_llm import TPILlamaForCausalLM
 from tpi_llm.split import split_pretrained_model
@@ -74,7 +73,10 @@ def main(kvstore, my_rank, world_size, args):
     args.length = adjust_length_to_model(args.length, max_sequence_length=max_seq_length)
     args.device = "cuda" if args.use_gpu else "cpu"
     args.rank = my_rank
-    assert args.memory_window >= 2, "Memory window should be larger than 10."
+    assert args.memory_window >= 2, \
+        "Memory window should be larger than 10."
+    assert model_config.get("num_key_value_heads", 1e9) >= world_size, \
+        "The number of nodes cannot be more than the number of kv heads."
     logger.info(f"My rank is {my_rank}, totally {world_size} nodes.")
 
     try:
