@@ -141,7 +141,7 @@ def merge_and_load_weights(sharded_filenames, is_safetensors):
         if is_safetensors:
             sharded_weights = safetensors.torch.load_file(filename)
         else:
-            sharded_weights = torch.load(filename)
+            sharded_weights = torch.load(filename, map_location="cpu")
         merged_weights.update(sharded_weights)
         del sharded_weights
     return merged_weights
@@ -299,7 +299,7 @@ def split_pretrained_model(model_path, world_size, ratio, save_dir="split"):
         if is_safetensors:
             full_weights = safetensors.torch.load_file(safetensors_file)
         else:
-            full_weights = torch.load(bin_file)
+            full_weights = torch.load(bin_file, map_location="cpu")
     elif os.path.exists(bin_index_file) or os.path.exists(safetensors_index_file):
         # merge sharded files first and then split
         index_file = safetensors_index_file if is_safetensors else bin_index_file
