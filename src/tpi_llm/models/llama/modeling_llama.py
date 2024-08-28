@@ -129,7 +129,11 @@ class TPILlamaAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.num_key_value_heads = num_kv_heads
-        self.num_key_value_groups = self.num_heads // self.num_key_value_heads
+        self.num_key_value_groups, remainder = divmod(self.num_heads, self.num_key_value_heads)
+        assert remainder == 0, \
+            (f"The value of num_heads ({self.num_heads}) must be divisible by "
+             f"num_key_value_heads ({self.num_key_value_heads}).")
+
         self.max_position_embeddings = config.max_position_embeddings
         self.rope_theta = config.rope_theta
         self.is_causal = True
@@ -155,6 +159,7 @@ class TPILlamaSdpaAttention(TPILlamaAttention):
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
         bsz, q_len, _ = hidden_states.size()
 
+        # [11, 11, 10] [2, 1, 1]
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
         value_states = self.v_proj(hidden_states)
