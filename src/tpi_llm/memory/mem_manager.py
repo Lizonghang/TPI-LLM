@@ -16,12 +16,15 @@ from ..utils import (
     OUTPUT_SAVE_PATH,
 )
 
+torch.set_num_threads(4)
+
 
 class MemoryManager:
     def __init__(self, model, rank, args):
         self._model = model
         self._device = model.device
         self._rank = rank
+        self._disabled = args.disable_memory_schedule
         self._split_dir = os.path.join(args.model_path, args.save_dir, f"node_{rank}")
         self._all_layers = set(model.state_dict().keys())
         self._all_blocks = ["input"] + [
@@ -150,7 +153,7 @@ class MemoryManager:
                 return
 
             # release all blocks before this block
-            while self._loaded_blocks:
+            while not self._disabled and self._loaded_blocks:
                 current_block = self._loaded_blocks[0]
                 if (block_name_ == "input" or
                         self._all_blocks.index(current_block) < self._all_blocks.index(block_name_)):
@@ -166,7 +169,7 @@ class MemoryManager:
             self._memory_usage_history = np.vstack((self._memory_usage_history, current_memory_usage))
 
         # Create a thread pool executor and run track function in the background using a thread pool
-        executor = ThreadPoolExecutor(max_workers=1)
+        executor = ThreadPoolExecutor(max_workers=4)
         loop = asyncio.get_event_loop()
         track_thread = loop.run_in_executor(executor, _track_func, block_name)
         if not async_op: self.wait(track_thread)
