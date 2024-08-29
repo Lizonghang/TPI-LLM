@@ -181,5 +181,5 @@ Below is a list of these options:
 | `--temperature`             | `1.0`     | `float` | Sampling temperature for text generation. (available only on the master node)                        |
 | `--k`                       | `0`       | `int`   | Number of highest probability tokens to keep for top-k sampling. (available only on the master node) |
 | `--p`                       | `0.9`     | `float` | Cumulative probability for nucleus sampling (top-p). (available only on the master node)             |
-| `--enable_memory_schedule`  | `False`   | `bool`  | Set to True to enable memory window scheduling, this may lead to lower speed.                        |
+| `--disable_memory_schedule` | `False`   | `bool`  | Set to True to disable memory window scheduling, this may lead to higher speed.                      |
 | `--memory_window`           | `2`       | `int`   | Size of the memory window used during inference. Should be at least 2.                               |
