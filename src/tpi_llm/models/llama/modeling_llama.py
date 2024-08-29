@@ -299,9 +299,9 @@ class TPILlamaDecoderLayer(nn.Module):
         )
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        self.mem_manager.track(f"mlp.{self.layer_idx}", async_op=True)
-
+        mem_thread = self.mem_manager.track(f"mlp.{self.layer_idx}", async_op=True)
         hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
+        self.mem_manager.wait(mem_thread)
 
         hidden_states = residual + hidden_states
 
@@ -312,9 +312,9 @@ class TPILlamaDecoderLayer(nn.Module):
         hidden_states = self.mlp(hidden_states)
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        self.mem_manager.track(f"self_attn.{self.layer_idx + 1}", async_op=True)
-
+        mem_thread = self.mem_manager.track(f"self_attn.{self.layer_idx + 1}", async_op=True)
         hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
+        self.mem_manager.wait(mem_thread)
 
         hidden_states = residual + hidden_states
 
