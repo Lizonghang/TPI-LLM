@@ -33,6 +33,7 @@ if __name__ == "__main__":
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--k", type=int, default=0)
     parser.add_argument("--p", type=float, default=0.9)
+    parser.add_argument("--disable_memory_schedule", action="store_true")
     parser.add_argument("--memory_window", type=int, default=2,
                         help="Memory window size, should be at least 2.")
     args = parser.parse_args()
