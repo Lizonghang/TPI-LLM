@@ -299,19 +299,22 @@ class TPILlamaDecoderLayer(nn.Module):
         )
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
+        self.mem_manager.track(f"mlp.{self.layer_idx}", async_op=True)
+
         hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
-        self.mem_manager.track(f"mlp.{self.layer_idx}")  # todo: realize async scheduling?
 
         hidden_states = residual + hidden_states
 
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
+
         hidden_states = self.mlp(hidden_states)
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
+        self.mem_manager.track(f"self_attn.{self.layer_idx + 1}", async_op=True)
+
         hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
-        self.mem_manager.track(f"self_attn.{self.layer_idx + 1}")  # todo: realize async scheduling?
 
         hidden_states = residual + hidden_states
 
@@ -466,8 +469,8 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         super().__init__(config)
         self.kvstore = kvstore
         self.rank = rank
-        self.mem_manager = MemoryManager(self, rank, args)
-        self.model = TPILlamaModel(config, kvstore, rank, self.mem_manager, args)
+        mem_manager = MemoryManager(self, rank, args)
+        self.model = TPILlamaModel(config, kvstore, rank, mem_manager, args)
         self.args = args
 
     def forward(
