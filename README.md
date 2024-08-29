@@ -166,19 +166,20 @@ Coming soon.
 TPI-LLM provides several optional parameters that you can customize to control various aspects of the inference process. 
 Below is a list of these options:
 
-| Argument           | Default   | Type    | Description                                                                                          |
-|--------------------|-----------|---------|------------------------------------------------------------------------------------------------------|
-| `--prompt`         | `""`      | `str`   | The input prompt.                                                                                    |
-| `--length`         | `20`      | `int`   | Maximum length of the generated sequence.                                                            |
-| `--prefix`         | `""`      | `str`   | Text added prior to input for context.                                                               |
-| `--use_gpu`        | `False`   | `bool`  | Whether to use GPU for inference. If false, use CPU by default.                                      |
-| `--split_bin`      | `False`   | `bool`  | Split the pretrained model file. (available only on the master node)                                 |
-| `--save_dir`       | `"split"` | `str`   | The directory to save split model files.                                                             |
-| `--seed`           | `42`      | `int`   | Random seed for reproducibility.                                                                     |
-| `--file_port`      | `29600`   | `int`   | Port number on the master node where the file server is listening on.                                |
-| `--broadcast_port` | `29700`   | `int`   | Port number on the master node where auxiliary information is listening on.                          |
-| `--force_download` | `False`   | `bool`  | Force worker nodes to re-download model weight slices. (available only on the non-master node)       |
-| `--temperature`    | `1.0`     | `float` | Sampling temperature for text generation. (available only on the master node)                        |
-| `--k`              | `0`       | `int`   | Number of highest probability tokens to keep for top-k sampling. (available only on the master node) |
-| `--p`              | `0.9`     | `float` | Cumulative probability for nucleus sampling (top-p). (available only on the master node)             |
-| `--memory_window`  | `2`       | `int`   | Size of the memory window used during inference. Should be at least 2.                               |
+| Argument                    | Default   | Type    | Description                                                                                          |
+|-----------------------------|-----------|---------|------------------------------------------------------------------------------------------------------|
+| `--prompt`                  | `""`      | `str`   | The input prompt.                                                                                    |
+| `--length`                  | `20`      | `int`   | Maximum length of the generated sequence.                                                            |
+| `--prefix`                  | `""`      | `str`   | Text added prior to input for context.                                                               |
+| `--use_gpu`                 | `False`   | `bool`  | Whether to use GPU for inference. If false, use CPU by default.                                      |
+| `--split_bin`               | `False`   | `bool`  | Split the pretrained model file. (available only on the master node)                                 |
+| `--save_dir`                | `"split"` | `str`   | The directory to save split model files.                                                             |
+| `--seed`                    | `42`      | `int`   | Random seed for reproducibility.                                                                     |
+| `--file_port`               | `29600`   | `int`   | Port number on the master node where the file server is listening on.                                |
+| `--broadcast_port`          | `29700`   | `int`   | Port number on the master node where auxiliary information is listening on.                          |
+| `--force_download`          | `False`   | `bool`  | Force worker nodes to re-download model weight slices. (available only on the non-master node)       |
+| `--temperature`             | `1.0`     | `float` | Sampling temperature for text generation. (available only on the master node)                        |
+| `--k`                       | `0`       | `int`   | Number of highest probability tokens to keep for top-k sampling. (available only on the master node) |
+| `--p`                       | `0.9`     | `float` | Cumulative probability for nucleus sampling (top-p). (available only on the master node)             |
+| `--enable_memory_schedule`  | `False`   | `bool`  | Set to True to enable memory window scheduling, this may lead to lower speed.                        |
+| `--memory_window`           | `2`       | `int`   | Size of the memory window used during inference. Should be at least 2.                               |
