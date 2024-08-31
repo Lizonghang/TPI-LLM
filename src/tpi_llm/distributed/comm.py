@@ -8,6 +8,14 @@ from abc import ABC, abstractmethod
 
 
 class CommunicatorBase(ABC):
+    """
+    Base class for implementing communication between distributed nodes.
+    This class provides the basic functionality of allreduce and acts as an abstract base
+    for more specific communicator implementations, such as broadcast, request, and barrier.
+
+    Args:
+        kvstore (KVStore): KVStore used for distributed key-value storage and synchronization.
+    """
 
     def __init__(self, kvstore: KVStore):
         self._kv = kvstore
@@ -42,19 +50,37 @@ class CommunicatorBase(ABC):
 
     @abstractmethod
     def barrier(self):
+        """
+        Abstract method for synchronizing nodes. Must be implemented by derived classes.
+        """
         pass
 
 
 class CommunicatorMaster(CommunicatorBase):
+    """
+    Communicator implementation for the master node. Handles data broadcasting and synchronization
+    among distributed nodes.
 
+    Args:
+        kvstore (KVStore): KVStore used for distributed key-value storage and synchronization.
+        host (str): The host IP address for the master node.
+        port (int): The port on which the master node listens for client connections.
+        world_size (int): The total number of nodes in the distributed system.
+    """
     def __init__(self, kvstore: KVStore, host: str, port: int, world_size: int):
         super().__init__(kvstore)
         self._world_size = world_size
         self._s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._s.bind((host, port))
-        self._s.listen(5)  # listen for all other nodes
+        self._s.listen(world_size - 1)  # listen for all other nodes
 
     def broadcast(self, data):
+        """
+        Broadcast data to all other nodes.
+
+        Args:
+            data: The data to be broadcast.
+        """
         connected_clients = 0
         while connected_clients < self._world_size - 1:
             client_socket, _ = self._s.accept()
@@ -63,26 +89,37 @@ class CommunicatorMaster(CommunicatorBase):
             connected_clients += 1
 
     def barrier(self):
-        self._kv._barrier()
-        # # collect BARRIER messages from all clients
-        # barrier_clients = []
-        # while len(barrier_clients) < self._world_size - 1:
-        #     client_socket, _ = self._s.accept()
-        #     message = client_socket.recv(8).decode("utf-8")
-        #     if message == "BARRIER":
-        #         barrier_clients.append(client_socket)
-        #     else:
-        #         raise ValueError(f"Received an unexpected message {message}.")
-        #
-        # # send ACK to each client to release them from the barrier
-        # for client in barrier_clients:
-        #     client.sendall("ACK".encode("utf-8"))
-        #     client.close()
-        # barrier_clients.clear()
+        """
+        Synchronize all nodes by implementing a barrier. Collects BARRIER requests from workers
+        and releases them once all have reached the barrier.
+        """
+        # collect BARRIER messages from all clients
+        barrier_clients = []
+        while len(barrier_clients) < self._world_size - 1:
+            client_socket, _ = self._s.accept()
+            message = client_socket.recv(8).decode("utf-8")
+            if message == "BARRIER":
+                barrier_clients.append(client_socket)
+            else:
+                raise ValueError(f"Received an unexpected message {message}.")
+
+        # send ACK to each client to release them from the barrier
+        for client in barrier_clients:
+            client.sendall("ACK".encode("utf-8"))
+            client.close()
+        barrier_clients.clear()
 
 
 class CommunicatorClient(CommunicatorBase):
+    """
+    Communicator implementation for non-master nodes. Handles requests and synchronization
+    operations with the master node.
 
+    Args:
+        kvstore (KVStore): KVStore used for distributed key-value storage and synchronization.
+        host (str): The host IP address of the master node.
+        port (int): The port on which the master node is listening.
+    """
     def __init__(self, kvstore: KVStore, host: str, port: int):
         super().__init__(kvstore)
         self._host = host
@@ -108,15 +145,17 @@ class CommunicatorClient(CommunicatorBase):
         return pickle.loads(data)
 
     def barrier(self):
-        self._kv._barrier()
-        # # connect to the master and send BARRIER message
-        # s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # s.connect((self._host, self._port))
-        # s.sendall("BARRIER".encode("utf-8"))
-        #
-        # # wait for ACK response to exit the barrier
-        # ack = s.recv(8).decode("utf-8")
-        # if ack == "ACK":
-        #     s.close()
-        # else:
-        #     raise ValueError(f"Received an unexpected message {ack}.")
+        """
+        Synchronize with the master node by sending a BARRIER request and waiting for an ACK.
+        """
+        # connect to the master and send BARRIER message
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.connect((self._host, self._port))
+        s.sendall("BARRIER".encode("utf-8"))
+
+        # wait for ACK response to exit the barrier
+        ack = s.recv(8).decode("utf-8")
+        if ack == "ACK":
+            s.close()
+        else:
+            raise ValueError(f"Received an unexpected message {ack}.")

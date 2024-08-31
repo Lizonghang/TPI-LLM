@@ -1,10 +1,8 @@
-import logging
 import argparse
 import torch
 import numpy as np
 from torch import nn
 from typing import Optional, Union, Tuple
-from memory_profiler import memory_usage
 from mxnet.kvstore import KVStore
 from transformers.models.llama import LlamaPreTrainedModel, LlamaForCausalLM, LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaRotaryEmbedding
@@ -15,13 +13,6 @@ from ...modeling_utils import TPIPreTrainedModel
 from ...memory import MemoryManager
 from ...split import get_heads_per_node
 from ...distributed import CommunicatorBase
-
-logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-    datefmt="%m/%d/%Y %H:%M:%S",
-    level=logging.INFO,
-)
-logger = logging.getLogger(__name__)
 
 
 def _prepare_4d_causal_attention_mask_with_cache_position(
@@ -309,8 +300,6 @@ class TPILlamaDecoderLayer(nn.Module):
             **kwargs,
         )
 
-        print(self.layer_idx)
-
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
         mem_thread = self.mem_manager.track(f"mlp.{self.layer_idx}", async_op=True)
         hidden_states = self.comm.allreduce(hidden_states)  # this is a blocking op
@@ -327,7 +316,6 @@ class TPILlamaDecoderLayer(nn.Module):
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
         mem_thread = self.mem_manager.track(f"self_attn.{self.layer_idx + 1}", async_op=True)
         hidden_states = self.comm.allreduce(hidden_states)  # this is a blocking op
-        print('after allreduce:', memory_usage(-1)[0])
         self.mem_manager.wait(mem_thread)
 
         hidden_states = residual + hidden_states
