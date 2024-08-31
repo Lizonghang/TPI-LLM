@@ -80,8 +80,8 @@ def allreduce(kvstore: KVStore, tensor: torch.Tensor) -> torch.Tensor:
     tensor_np = tensor.detach().cpu().numpy()
     tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
 
-    # perform allreduce
-    key = "preload_hidden_states" if tensor.size(1) > 1 else "decode_hidden_states"
+    # perform allreduce, 0 for prefilling and 1 for decoding
+    key = 0 if tensor.size(1) > 1 else 1
     try:
         kvstore.push(key, tensor_nd)
         kvstore.pull(key, out=tensor_nd)
