@@ -80,8 +80,8 @@ def allreduce(kvstore: KVStore, tensor: torch.Tensor) -> torch.Tensor:
     tensor_np = tensor.detach().cpu().numpy()
     tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
 
-    # perform allreduce, 0 for prefilling and 1 for decoding
-    key = int(tensor.size(1) > 1)
+    # perform allreduce, 1 for prefilling and 0 for decoding
+    key = str(int(tensor.size(1) > 1))
     try:
         kvstore.push(key, tensor_nd)
         kvstore.pull(key, out=tensor_nd)
