@@ -45,4 +45,4 @@ ENV PYTHONPATH /root/TPI-LLM/src:$PYTHONPATH
 RUN pip install --no-cache-dir mxnet==1.9.1
 
 WORKDIR /root/TPI-LLM
-CMD bash -c "git pull origin tpi-mx && /bin/bash"
+CMD ["bash", "-c", "git pull origin tpi-mx && /bin/bash"]
