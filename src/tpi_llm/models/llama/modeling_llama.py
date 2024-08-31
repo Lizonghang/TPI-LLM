@@ -1,8 +1,10 @@
+import logging
 import argparse
 import torch
 import numpy as np
 from torch import nn
 from typing import Optional, Union, Tuple
+from memory_profiler import memory_usage
 from mxnet.kvstore import KVStore
 from transformers.models.llama import LlamaPreTrainedModel, LlamaForCausalLM, LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaRotaryEmbedding
@@ -12,7 +14,14 @@ from transformers.activations import ACT2FN
 from ...modeling_utils import TPIPreTrainedModel
 from ...memory import MemoryManager
 from ...split import get_heads_per_node
-from ...distributed import server_broadcast, client_request, allreduce
+from ...distributed import CommunicatorBase
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 
 def _prepare_4d_causal_attention_mask_with_cache_position(
@@ -228,6 +237,7 @@ class TPILlamaDecoderLayer(nn.Module):
         config: LlamaConfig,
         layer_idx: int,
         kvstore: KVStore,
+        communicator: CommunicatorBase,
         rank: int,
         mem_manager: MemoryManager,
         args: argparse.Namespace
@@ -236,6 +246,7 @@ class TPILlamaDecoderLayer(nn.Module):
         self.config = config
         self.layer_idx = layer_idx
         self.kvstore = kvstore
+        self.comm = communicator
         self.rank = rank
         self.mem_manager = mem_manager
 
@@ -298,9 +309,11 @@ class TPILlamaDecoderLayer(nn.Module):
             **kwargs,
         )
 
+        print(self.layer_idx)
+
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
         mem_thread = self.mem_manager.track(f"mlp.{self.layer_idx}", async_op=True)
-        hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
+        hidden_states = self.comm.allreduce(hidden_states)  # this is a blocking op
         self.mem_manager.wait(mem_thread)
 
         hidden_states = residual + hidden_states
@@ -313,7 +326,8 @@ class TPILlamaDecoderLayer(nn.Module):
 
         # perform allreduce to sum up hidden_states, meanwhile load next blocks
         mem_thread = self.mem_manager.track(f"self_attn.{self.layer_idx + 1}", async_op=True)
-        hidden_states = allreduce(self.kvstore, hidden_states)  # this is a blocking op
+        hidden_states = self.comm.allreduce(hidden_states)  # this is a blocking op
+        print('after allreduce:', memory_usage(-1)[0])
         self.mem_manager.wait(mem_thread)
 
         hidden_states = residual + hidden_states
@@ -336,12 +350,14 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         self,
         config: LlamaConfig,
         kvstore: KVStore,
+        communicator: CommunicatorBase,
         rank: int,
         mem_manager: MemoryManager,
         args: argparse.Namespace
     ):
         super().__init__(config)
         self.kvstore = kvstore
+        self.comm = communicator
         self.rank = rank
         self.mem_manager = mem_manager
         self.padding_idx = config.pad_token_id
@@ -352,7 +368,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
 
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList([
-            TPILlamaDecoderLayer(config, layer_idx, kvstore, rank, mem_manager, args)
+            TPILlamaDecoderLayer(config, layer_idx, kvstore, communicator, rank, mem_manager, args)
             for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -416,9 +432,9 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
             # shape of cache_position: (seq_len,)
             # shape of causal_mask: (1, 1, seq_len, seq_len)
             broadcast_data = [inputs_embeds, position_embeddings, cache_position, causal_mask]
-            server_broadcast(broadcast_data, self.master_ip, self.broadcast_port, self.world_size, self.kvstore)
+            self.comm.broadcast(broadcast_data)
         else:
-            broadcast_data = client_request(self.master_ip, self.broadcast_port, self.kvstore)
+            broadcast_data = self.comm.request()
             inputs_embeds, position_embeddings, cache_position, causal_mask = broadcast_data
 
         # decoder layers
@@ -463,6 +479,7 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         self,
         config: LlamaConfig,
         kvstore: KVStore,
+        communicator: CommunicatorBase,
         rank: int,
         args: argparse.Namespace
     ):
@@ -470,7 +487,7 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         self.kvstore = kvstore
         self.rank = rank
         mem_manager = MemoryManager(self, rank, args)
-        self.model = TPILlamaModel(config, kvstore, rank, mem_manager, args)
+        self.model = TPILlamaModel(config, kvstore, communicator, rank, mem_manager, args)
         self.args = args
 
     def forward(

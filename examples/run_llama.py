@@ -5,7 +5,12 @@ from transformers import AutoTokenizer, TextStreamer
 from tpi_llm import TPILlamaForCausalLM
 from tpi_llm.split import split_pretrained_model
 from tpi_llm.modeling_utils import load_model_config
-from tpi_llm.distributed import run_sync_server, download_file
+from tpi_llm.distributed import (
+    run_sync_server,
+    download_file,
+    CommunicatorMaster,
+    CommunicatorClient,
+)
 
 
 logging.basicConfig(
@@ -45,6 +50,8 @@ def main(kvstore, my_rank, world_size, args):
             raise Exception(f"Model path {args.model_path} does not exist, "
                             f"please download the pretrained model parameters first.")
 
+        comm = CommunicatorMaster(kvstore, args.master_ip, args.broadcast_port, world_size)
+
         # split pretrained model files.
         if not os.path.exists(split_file_path) or args.split_bin:
             split_pretrained_model(
@@ -59,9 +66,10 @@ def main(kvstore, my_rank, world_size, args):
         run_sync_server(args.master_ip, args.file_port, args.model_path, split_file_path)
 
         # ensure that the file download is executed after the master node binds its file port.
-        kvstore._barrier()
+        comm.barrier()
     else:
-        kvstore._barrier()
+        comm = CommunicatorClient(kvstore, args.master_ip, args.broadcast_port)
+        comm.barrier()
         # each node download sliced weight files from the master node.
         if not os.path.exists(split_file_path) or args.force_download:
             os.makedirs(os.path.join(split_file_path, f"node_{my_rank}"), exist_ok=True)
@@ -103,7 +111,13 @@ def main(kvstore, my_rank, world_size, args):
         ).to(args.device)
 
     # load model and run tensor-parallelism inference
-    model = model_class.from_pretrained(args.model_path, kvstore, rank=my_rank, args=args)
+    model = model_class.from_pretrained(
+        args.model_path,
+        kvstore,
+        comm,
+        rank=my_rank,
+        args=args
+    )
 
     # run generate with streaming output
     model.generate(
@@ -113,7 +127,8 @@ def main(kvstore, my_rank, world_size, args):
         top_k=args.k,
         top_p=args.p,
         do_sample=True,
-        streamer=streamer
+        streamer=streamer,
+        communicator=comm,
     )
 
     # print recorded memory usage

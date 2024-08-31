@@ -9,7 +9,6 @@ from transformers import (
     StoppingCriteriaList,
     DynamicCache,
 )
-from ..distributed import server_broadcast, client_request
 
 
 class TPIGenerationMixin(GenerationMixin):
@@ -20,6 +19,7 @@ class TPIGenerationMixin(GenerationMixin):
         stopping_criteria: StoppingCriteriaList,
         generation_config: GenerationConfig,
         streamer: Optional["BaseStreamer"],
+        communicator: Optional["BaseCommunicator"],
         logits_warper: Optional[LogitsProcessorList],
         **model_kwargs,
     ) -> torch.LongTensor:
@@ -40,6 +40,8 @@ class TPIGenerationMixin(GenerationMixin):
                 Configuration parameters for the generation process.
             streamer (Optional[BaseStreamer]):
                 Optional streamer to stream the generated sequences.
+            communicator (Optional[BaseCommunicator]):
+                Optional communicator to use for broadcast, request, and barrier.
             logits_warper (Optional[LogitsProcessorList]):
                 A list of processors used to adjust the prediction scores before multinomial sampling, required
                 if `do_sample` is set to True.
@@ -110,13 +112,7 @@ class TPIGenerationMixin(GenerationMixin):
 
                 # update finish status and synchronize with other nodes
                 unfinished = unfinished & ~stopping_criteria(input_ids, scores)
-                server_broadcast(
-                    broadcast_data=int(unfinished.cpu()),
-                    master_ip=self.args.master_ip,
-                    broadcast_port=self.args.broadcast_port,
-                    world_size=self.args.world_size,
-                    kvstore=self.kvstore
-                )
+                communicator.broadcast(int(unfinished.cpu()))
 
                 # This is needed to properly delete outputs.logits which may be very large for first iteration
                 # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
@@ -132,11 +128,7 @@ class TPIGenerationMixin(GenerationMixin):
                 # assist forward pass to get next token
                 self(**model_kwargs)
                 # retrieve finish status from the master node
-                unfinished = client_request(
-                    master_ip=self.args.master_ip,
-                    broadcast_port=self.args.broadcast_port,
-                    kvstore=self.kvstore
-                )
+                unfinished = communicator.request()
 
     def _validate_input(self, input_tensor):
         """
@@ -169,6 +161,7 @@ class TPIGenerationMixin(GenerationMixin):
         stopping_criteria: Optional[StoppingCriteriaList] = None,
         prefix_allowed_tokens_fn: Optional[Callable[[int, torch.Tensor], List[int]]] = None,
         streamer: Optional["BaseStreamer"] = None,
+        communicator: Optional["BaseCommunicator"] = None,
         **kwargs,
     ) -> torch.LongTensor:
         """
@@ -191,6 +184,8 @@ class TPIGenerationMixin(GenerationMixin):
             streamer (Optional["BaseStreamer"]):
                 An optional streamer object that allows for processing or outputting the generated tokens in real-time
                 (e.g., streaming generation results). Defaults to None.
+            communicator (Optional["BaseCommunicator"]):
+                An optional communicator object that supports broadcast, request, and barrier. Defaults to None.
             **kwargs:
                 Additional keyword arguments that can include model-specific parameters or be used to
                 update the `generation_config`.
@@ -294,6 +289,7 @@ class TPIGenerationMixin(GenerationMixin):
                 generation_config=generation_config,
                 synced_gpus=False,
                 streamer=streamer,
+                communicator=communicator,
                 **model_kwargs,
             )
         else:
@@ -306,5 +302,6 @@ class TPIGenerationMixin(GenerationMixin):
                 generation_config=generation_config,
                 synced_gpus=False,
                 streamer=None,
+                communicator=communicator,
                 **model_kwargs,
             )
