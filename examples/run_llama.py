@@ -1,5 +1,4 @@
 import os
-import time
 import logging
 import torch
 from transformers import AutoTokenizer, TextStreamer
@@ -69,7 +68,6 @@ def main(kvstore, my_rank, world_size, args):
         # ensure that the file download is executed after the master node binds its file port.
         comm.barrier()
     else:
-        time.sleep(1)  # ensure the master has started listening
         comm = CommunicatorClient(kvstore, args.master_ip, args.broadcast_port)
         comm.barrier()
         # each node download sliced weight files from the master node.
