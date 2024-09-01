@@ -16,6 +16,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 * 2024/08/22: Add support for Llama 2, Llama 3 and Llama 3.1.
 * 2024/08/26: Implement a file server to synchronize sliced model files to other nodes.
 * 2024/08/27: Add the MXNET KVSTORE backend.
+* 2024/09/01: Add the NETSTORM KVSTORE backend.
 
 # Installation
 ## Use the Source Code
