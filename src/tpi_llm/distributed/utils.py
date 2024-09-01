@@ -1,14 +1,14 @@
+import socket
 import time
 
 
-def connect_with_retry(s, host, port, retry_interval=0.5, max_retry=10):
+def connect_with_retry(host, port, retry_interval=0.5, max_retry=10) -> socket.socket:
     """
     This function tries to establish a connection to the given host and port using
     the provided socket object. If the connection fails due to a `ConnectionRefusedError`,
     it will retry the connection after a specified interval, up to a maximum number of retries.
 
     Args:
-        s (socket.socket): The socket object to be used for the connection.
         host (str): The hostname or IP address of the node to connect to.
         port (int): The port number on the node to connect to.
         retry_interval (float, optional): The time in seconds to wait between retry attempts.
@@ -18,11 +18,20 @@ def connect_with_retry(s, host, port, retry_interval=0.5, max_retry=10):
 
     Raises:
         ConnectionRefusedError: If the connection is refused after the maximum number of retries.
+
+    Returns:
+        socket.socket: The connected socket object.
     """
     num_retry = 0
     while num_retry < max_retry:
         num_retry += 1
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.connect((host, port))
+            return s
         except ConnectionRefusedError:
+            s.close()
             time.sleep(retry_interval)
+
+    raise ConnectionRefusedError(f"Failed to connect to {host}:{port} after {max_retry} attempts.")

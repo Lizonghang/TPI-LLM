@@ -30,7 +30,7 @@ def download_file(host: str, port: int, rank: int, model_path: str, split_path: 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             # connect to the file server
-            connect_with_retry(s, host, port)
+            s.connect((host, port))
             # send my rank to the master node
             s.sendall(struct.pack("i", rank))
 

@@ -133,8 +133,7 @@ class CommunicatorClient(CommunicatorBase):
         Returns:
             The broadcast data received from the master node.
         """
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        connect_with_retry(s, self._host, self._port)
+        s = connect_with_retry(self._host, self._port)
         # receive the data in chunks from the master node
         data = b""
         while True:
@@ -150,8 +149,7 @@ class CommunicatorClient(CommunicatorBase):
         Synchronize with the master node by sending a BARRIER request and waiting for an ACK.
         """
         # connect to the master and send BARRIER message
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        connect_with_retry(s, self._host, self._port)
+        s = connect_with_retry(self._host, self._port)
         s.sendall("BARRIER".encode("utf-8"))
 
         # wait for ACK response to exit the barrier
