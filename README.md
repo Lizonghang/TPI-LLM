@@ -24,6 +24,7 @@ devices, and introduce acceleration techniques to ensure efficient inference.
 ```commandline
 > git clone https://github.com/Lizonghang/TPI-LLM
 > cd TPI-LLM
+> git checkout tpi-mx
 ```
 
 2. Add `PYTHONPATH` to `.bashrc`:
@@ -58,7 +59,7 @@ We have provided Docker images for TPI-LLM, available on [Docker Hub](https://hu
 This is the easiest way to get started, as it includes all dependencies pre-installed.
 
 ```commandline
-> docker run -dit --name master lizonghango00o1/tpi-llm:1.0.1.mx
+> docker run -dit --name master lizonghango00o1/tpi-llm:1.0.3.mx
 ```
 
 If this is a master node, use `docker cp <HOST_MODEL_PATH> master:/root/TPI-LLM/` to copy the pretrained model files
