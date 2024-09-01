@@ -151,7 +151,6 @@ class CommunicatorClient(CommunicatorBase):
         """
         # connect to the master and send BARRIER message
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((self._host, self._port))
         connect_with_retry(s, self._host, self._port)
         s.sendall("BARRIER".encode("utf-8"))
 
