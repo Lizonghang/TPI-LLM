@@ -34,18 +34,10 @@ class CommunicatorBase(ABC):
         # convert torch.Tensor to a DLPack tensor and then to an MXNet NDArray
         tensor_np = tensor.detach().cpu().numpy()
         tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
-
         # perform allreduce, 1 for prefilling and 0 for decoding
         key = str(int(tensor.size(1) > 1))
-        try:
-            self._kv.push(key, tensor_nd)
-            self._kv.pull(key, out=tensor_nd)
-        except mx.base.MXNetError:  # the key may not be initialized
-            self._kv.init(key, nd.zeros_like(tensor_nd))  # only kv.rank 0 will execute initialization
-            self.barrier()  # make sure kvstore init is complete before retrying
-            self._kv.push(key, tensor_nd)
-            self._kv.pull(key, out=tensor_nd)
-
+        self._kv.push(key, tensor_nd)
+        self._kv.pull(key, out=tensor_nd)
         # convert the reduced MXNet NDArray back to a PyTorch tensor
         return torch.from_numpy(tensor_nd.asnumpy()).to(tensor.device)
 
@@ -53,6 +45,13 @@ class CommunicatorBase(ABC):
     def barrier(self):
         """
         Abstract method for synchronizing nodes. Must be implemented by derived classes.
+        """
+        pass
+
+    @abstractmethod
+    def close(self):
+        """
+        Abstract method for cleaning up the socket connection. Must be implemented by derived classes.
         """
         pass
 
@@ -110,6 +109,9 @@ class CommunicatorMaster(CommunicatorBase):
             client.close()
         barrier_clients.clear()
 
+    def close(self):
+        self._s.close()
+
 
 class CommunicatorClient(CommunicatorBase):
     """
@@ -158,3 +160,7 @@ class CommunicatorClient(CommunicatorBase):
             s.close()
         else:
             raise ValueError(f"Received an unexpected message {ack}.")
+
+    def close(self):
+        # nothing to do with client
+        pass

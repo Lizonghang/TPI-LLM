@@ -1,6 +1,7 @@
 import os
 import logging
 import torch
+from mxnet import nd
 from transformers import AutoTokenizer, TextStreamer
 from tpi_llm import TPILlamaForCausalLM
 from tpi_llm.split import split_pretrained_model
@@ -109,6 +110,13 @@ def main(kvstore, my_rank, world_size, args):
             add_special_tokens=False,
             return_tensors="pt"
         ).to(args.device)
+        input_len = input_ids.size(1)
+
+        # broadcast input_len to other nodes to init kvstore
+        comm.broadcast(input_len)
+    else:
+        # receive input_len from master node to init kvstore
+        input_len = comm.request()
 
     # load model and run tensor-parallelism inference
     model = model_class.from_pretrained(
@@ -118,6 +126,12 @@ def main(kvstore, my_rank, world_size, args):
         rank=my_rank,
         args=args
     )
+
+    # init kvstore, 1 for prefilling and 0 for decoding,
+    # note: only kv.rank=0 will execute initialization.
+    kvstore.init("1", nd.zeros((1, input_len, model.config.hidden_size)))
+    kvstore.init("0", nd.zeros((1, 1, model.config.hidden_size)))
+    comm.barrier()  # make sure kvstore init is complete before push/pull
 
     # run generate with streaming output
     model.generate(
@@ -130,6 +144,8 @@ def main(kvstore, my_rank, world_size, args):
         streamer=streamer,
         communicator=comm,
     )
+
+    comm.close()
 
     # print recorded memory usage
     # time_str, mem_str = model.mem_manager.memory_history
