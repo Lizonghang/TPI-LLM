@@ -125,15 +125,19 @@ class CommunicatorClient(CommunicatorBase):
         self._host = host
         self._port = port
 
-    def request(self):
+    def request(self, timeout=5.):
         """
         Request and receive data from the master node.
+
+        Args:
+            timeout (float): The maximum time in seconds to wait for the connection.
 
         Returns:
             The broadcast data received from the master node.
         """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self._host, self._port))
+        s.settimeout(timeout)
         # receive the data in chunks from the master node
         data = b""
         while True:
@@ -144,13 +148,17 @@ class CommunicatorClient(CommunicatorBase):
         s.close()
         return pickle.loads(data)
 
-    def barrier(self):
+    def barrier(self, timeout=5.):
         """
         Synchronize with the master node by sending a BARRIER request and waiting for an ACK.
+
+        Args:
+            timeout (float): The maximum time in seconds to wait for the connection.
         """
         # connect to the master and send BARRIER message
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self._host, self._port))
+        s.settimeout(timeout)
         s.sendall("BARRIER".encode("utf-8"))
 
         # wait for ACK response to exit the barrier
