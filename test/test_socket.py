@@ -3,6 +3,7 @@ import time
 import socket
 import argparse
 import threading
+from mxnet import kv
 
 
 def _download_handler(addr):
@@ -26,8 +27,9 @@ if __name__ == "__main__":
     parser.add_argument("--broadcast_port", type=int, default=29700, help="Broadcast server port.")
     args = parser.parse_args()
 
+    kvstore = kv.create("dist_sync")
     rank = int(os.environ["RANK"])
-    world_size = 5
+    world_size = kvstore.num_workers
     master_ip = os.environ["MASTER_ADDR"]
 
     if rank == 0:
