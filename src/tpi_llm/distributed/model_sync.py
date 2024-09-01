@@ -5,6 +5,7 @@ import socket
 import threading
 from typing import List
 from tqdm import tqdm
+from .utils import connect_with_retry
 from ..utils import FILES_TO_SYNC
 
 logging.basicConfig(
@@ -15,7 +16,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def download_file(host: str, port: int, rank: int, model_path: str, split_path: str, timeout: float = 5.):
+def download_file(host: str, port: int, rank: int, model_path: str, split_path: str):
     """
     Connect to the file server on the master node to download sliced model parameter files.
 
@@ -25,13 +26,11 @@ def download_file(host: str, port: int, rank: int, model_path: str, split_path: 
         rank (int): The rank of the requesting node.
         model_path (str): The directory to save the main model files.
         split_path (str): The directory to save the split model files.
-        timeout (float): The maximum time in seconds to wait for the connection.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
             # connect to the file server
-            s.connect((host, port))
-            s.settimeout(timeout)
+            connect_with_retry(s, host, port)
             # send my rank to the master node
             s.sendall(struct.pack("i", rank))
 

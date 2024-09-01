@@ -5,6 +5,7 @@ import mxnet as mx
 from mxnet import nd
 from mxnet.kvstore import KVStore
 from abc import ABC, abstractmethod
+from .utils import connect_with_retry
 
 
 class CommunicatorBase(ABC):
@@ -125,19 +126,15 @@ class CommunicatorClient(CommunicatorBase):
         self._host = host
         self._port = port
 
-    def request(self, timeout=5.):
+    def request(self):
         """
         Request and receive data from the master node.
-
-        Args:
-            timeout (float): The maximum time in seconds to wait for the connection.
 
         Returns:
             The broadcast data received from the master node.
         """
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((self._host, self._port))
-        s.settimeout(timeout)
+        connect_with_retry(s, self._host, self._port)
         # receive the data in chunks from the master node
         data = b""
         while True:
@@ -148,17 +145,14 @@ class CommunicatorClient(CommunicatorBase):
         s.close()
         return pickle.loads(data)
 
-    def barrier(self, timeout=5.):
+    def barrier(self):
         """
         Synchronize with the master node by sending a BARRIER request and waiting for an ACK.
-
-        Args:
-            timeout (float): The maximum time in seconds to wait for the connection.
         """
         # connect to the master and send BARRIER message
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.connect((self._host, self._port))
-        s.settimeout(timeout)
+        connect_with_retry(s, self._host, self._port)
         s.sendall("BARRIER".encode("utf-8"))
 
         # wait for ACK response to exit the barrier
