@@ -91,7 +91,7 @@ class MemoryManager:
                 block_id, _ = self._get_bid_and_btype(block_name_)
                 bin_path = os.path.join(self._split_dir, MLP_SAVE_PATH.format(l=block_id))
             else:
-                raise NotImplementedError(f"Block name {block_name} is not supported.")
+                raise NotImplementedError(f"Block name {block_name_} is not supported.")
 
             # load pretrained weights into model tensors
             try:
