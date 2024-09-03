@@ -146,7 +146,3 @@ def main(kvstore, my_rank, world_size, args):
     )
 
     comm.close()
-
-    # print recorded memory usage
-    # time_str, mem_str = model.mem_manager.memory_history
-    # logger.info(f"RANK {my_rank}:\nTimestamp: {time_str} \nMemory usage: {mem_str}")

@@ -1,12 +1,9 @@
 import os
 import re
-import time
 import torch
 import asyncio
-import numpy as np
 from typing import Tuple, Deque
 from collections import deque
-from memory_profiler import memory_usage
 from concurrent.futures import ThreadPoolExecutor, Future
 from ..utils import (
     BLOCK_TEMPLATE,
@@ -34,7 +31,6 @@ class MemoryManager:
         ] + ["output"]
         self._loaded_blocks: Deque[str] = deque(maxlen=args.memory_window)
         self._layers_in_block = {block_key: [] for block_key in self._all_blocks}
-        self._memory_usage_history = np.array([[time.time(), memory_usage()[0]]])
 
     def _get_bid_and_btype(self, block_name: str) -> Tuple[int, str]:
         """
@@ -53,6 +49,15 @@ class MemoryManager:
             return int(match.group(2)), match.group(1)
         else:
             raise ValueError(f"Key '{block_name}' does not match pattern '{pattern}'")
+
+    def _find_module(self, model, key):
+        module = model
+        *module_names, param_name = key.split('.')
+        for name in module_names:
+            module = getattr(module, name, None)
+            if module is None:
+                raise ValueError(f"Parameter {key} not found.")
+        return module
 
     def _load_block_until_filled(self, block_name: str):
         """
@@ -100,8 +105,11 @@ class MemoryManager:
 
                 for key, weight in pretrained_weights.items():
                     if key in self._all_layers:
-                        self._model.state_dict()[key].copy_(weight)
-                        self._layers_in_block[block_name_].append(key)
+                        *module_names, param_name = key.split('.')
+                        module = self._find_module(self._model, key)
+                        module.register_parameter(param_name, torch.nn.Parameter(weight))
+                        if key not in self._layers_in_block[block_name_]:
+                            self._layers_in_block[block_name_].append(key)
 
                 del pretrained_weights
             except FileNotFoundError:
@@ -123,17 +131,15 @@ class MemoryManager:
             raise KeyError(f"Block name '{block_name}' not found in _layers_in_block.")
 
         for layer_key in self._layers_in_block[block_name]:
-            tensor_ = self._model.state_dict()[layer_key]
-
-            # release the tensor memory depending on its device type
-            if tensor_.device.type == 'cuda':
+            module = self._find_module(self._model, layer_key)
+            *module_names, param_name = layer_key.split('.')
+            param = module._parameters[param_name]
+            if param.device.type == "cuda":
                 with torch.no_grad():
-                    tensor_.data = None  # de-referencing gpu memory
+                    param.data = None
+                torch.cuda.empty_cache()
             else:
-                del tensor_  # deleting cpu tensor
-
-        # force to clear gpu cache
-        torch.cuda.empty_cache()
+                del param
 
     def track(self, block_name: str, async_op: bool = False) -> Future:
         """
@@ -164,10 +170,6 @@ class MemoryManager:
             # load the block and subsequent blocks until the deque is full
             self._load_block_until_filled(block_name)
 
-            # record memory usage
-            current_memory_usage = np.array([[time.time(), memory_usage()[0]]])
-            self._memory_usage_history = np.vstack((self._memory_usage_history, current_memory_usage))
-
         # Create a thread pool executor and run track function in the background using a thread pool
         executor = ThreadPoolExecutor(max_workers=4)
         loop = asyncio.get_event_loop()
@@ -188,9 +190,3 @@ class MemoryManager:
         loop = asyncio.get_event_loop()
         result = loop.run_until_complete(thread)
         return result
-
-    @property
-    def memory_history(self):
-        log_ts_str = ', '.join([str(t) for t in self._memory_usage_history[:, 0].tolist()])
-        log_mem_str = ', '.join([str(int(m)) for m in self._memory_usage_history[:, 1].tolist()])
-        return log_ts_str, log_mem_str

@@ -5,7 +5,6 @@ import socket
 import threading
 from typing import List
 from tqdm import tqdm
-from .utils import connect_with_retry
 from ..utils import FILES_TO_SYNC
 
 logging.basicConfig(
