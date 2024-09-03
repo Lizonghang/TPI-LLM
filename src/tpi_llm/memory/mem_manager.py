@@ -107,7 +107,10 @@ class MemoryManager:
                     if key in self._all_layers:
                         *module_names, param_name = key.split('.')
                         module = self._find_module(self._model, key)
-                        module.register_parameter(param_name, torch.nn.Parameter(weight))
+                        module.register_parameter(
+                            param_name,
+                            torch.nn.Parameter(weight.float(), requires_grad=False)
+                        )
                         if key not in self._layers_in_block[block_name_]:
                             self._layers_in_block[block_name_].append(key)
 
