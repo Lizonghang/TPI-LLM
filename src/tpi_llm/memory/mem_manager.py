@@ -192,5 +192,5 @@ class MemoryManager:
     @property
     def memory_history(self):
         log_ts_str = ', '.join([str(t) for t in self._memory_usage_history[:, 0].tolist()])
-        log_mem_str = ', '.join([str(m) for m in self._memory_usage_history[:, 1].tolist()])
+        log_mem_str = ', '.join([str(int(m)) for m in self._memory_usage_history[:, 1].tolist()])
         return log_ts_str, log_mem_str
