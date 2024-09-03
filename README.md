@@ -7,9 +7,8 @@ involve sensitive personal information.
 Our TPI-LLM system addresses the privacy issue by enabling LLM inference on edge devices with limited resources. 
 The system leverages multiple edge devices to perform inference through tensor parallelism, combined with 
 sophisticated memory window scheduling techniques to minimize memory usage. Currently, TPI-LLM can run the 
-full-precision Llama-2-3B model on a single Mac with only 8GB of RAM, while maintaining a stable memory footprint 
-below 0.7 GB. In the future, we will support larger models, such as Llama-3.1-70B and Llama-3.1-405B, across multiple edge 
-devices, and introduce acceleration techniques to ensure efficient inference.
+full-precision Llama-3.1-8B model on 2 laptops with 8GB of RAM. In the future, we will introduce more techniques 
+to speed up LLM inference.
 
 # Updates
 * 2024/08/20: Add support for multi-host tensor parallelism.
