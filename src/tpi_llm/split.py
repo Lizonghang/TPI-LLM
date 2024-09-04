@@ -190,7 +190,10 @@ def split_attention_heads(weights, layer_num, heads_per_node, kv_heads_per_node,
         attn_path = os.path.join(node_dir, ATTN_SAVE_PATH.format(l=layer_num))
         state_dict = {
             input_layernorm_key: weights[input_layernorm_key],
-            q_key: q_.clone(), k_key: k_.clone(), v_key: v_.clone(), o_key: o_.clone(),
+            q_key: q_,
+            k_key: k_,
+            v_key: v_,
+            o_key: o_,
         }
         if rotary_emb_key in weights.keys():
             state_dict[rotary_emb_key] = weights[rotary_emb_key]
@@ -232,9 +235,9 @@ def split_mlp(weights, layer_num, heads_per_node, model_path, save_dir="split"):
         mlp_path = os.path.join(node_dir, MLP_SAVE_PATH.format(l=layer_num))
         torch.save({
             post_attn_layernorm_key: weights[post_attn_layernorm_key],
-            gate_key: gate_.clone(),
-            up_key: up_.clone(),
-            down_key: down_.clone(),
+            gate_key: gate_,
+            up_key: up_,
+            down_key: down_,
         }, mlp_path)
 
 

@@ -1,7 +1,5 @@
 import math
 import argparse
-import time
-
 import torch
 import numpy as np
 from torch import nn
@@ -122,7 +120,8 @@ class TPILlamaAttention(nn.Module):
         layer_idx: int,
         num_heads: int,
         num_kv_heads: int,
-        head_dim: int
+        head_dim: int,
+        attn_type: str,
     ):
         super().__init__()
         self.config = config
@@ -131,6 +130,8 @@ class TPILlamaAttention(nn.Module):
         self.hidden_size = config.hidden_size
         self.num_heads = num_heads
         self.head_dim = head_dim
+        self.attn_type = attn_type
+
         self.num_key_value_heads = num_kv_heads
         self.num_key_value_groups, remainder = divmod(self.num_heads, self.num_key_value_heads)
         assert remainder == 0, \
@@ -176,84 +177,34 @@ class TPILlamaAttention(nn.Module):
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
 
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
-
-        if attention_mask is not None:  # no matter the length, we just slice it
-            causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
-            attn_weights = attn_weights + causal_mask
-
-        # upcast attention to fp32
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_output = torch.matmul(attn_weights, value_states)
-
-        if attn_output.size() != (bsz, self.num_heads, q_len, self.head_dim):
-            raise ValueError(
-                f"`attn_output` should be of size {(bsz, self.num_heads, q_len, self.head_dim)}, but is"
-                f" {attn_output.size()}"
-            )
-
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.view(bsz, q_len, -1)
-
-        attn_output = self.o_proj(attn_output)
-
-        return attn_output, None, past_key_value
-
-
-class TPILlamaSdpaAttention(TPILlamaAttention):
-
-    def forward(
-        self,
-        hidden_states: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        past_key_value: Optional[Cache] = None,
-        cache_position: Optional[torch.LongTensor] = None,
-        position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-        **kwargs,
-    ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        bsz, q_len, _ = hidden_states.size()
-
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
-        value_states = self.v_proj(hidden_states)
-
-        query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-
-        cos, sin = position_embeddings
-        query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
-
-        cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
-        key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
-
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
-
-        causal_mask = attention_mask
-        causal_mask = causal_mask[:, :, :, : key_states.shape[-2]]
-
+        causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
         if query_states.device.type == "cuda" and causal_mask is not None:
             query_states = query_states.contiguous()
             key_states = key_states.contiguous()
             value_states = value_states.contiguous()
 
-        is_causal = True if causal_mask is None and q_len > 1 else False
-
-        attn_output = torch.nn.functional.scaled_dot_product_attention(
-            query_states,
-            key_states,
-            value_states,
-            attn_mask=causal_mask,
-            dropout_p=0.,
-            is_causal=is_causal,
-        )
+        if self.attn_type == "eager":
+            attn_weights = torch.matmul(
+                query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+            attn_weights = attn_weights + causal_mask
+            attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            attn_output = torch.matmul(attn_weights, value_states)
+        elif self.attn_type == "sdpa":
+            is_causal = True if causal_mask is None and q_len > 1 else False
+            attn_output = torch.nn.functional.scaled_dot_product_attention(
+                query_states,
+                key_states,
+                value_states,
+                attn_mask=causal_mask,
+                dropout_p=0.,
+                is_causal=is_causal,
+            )
+        else:
+            raise NotImplementedError(f"attn_type {self.attn_type} not implemented.")
 
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.view(bsz, q_len, -1)
-
         attn_output = self.o_proj(attn_output)
-
         return attn_output, None, past_key_value
 
 
@@ -272,12 +223,6 @@ class TPILlamaMLP(nn.Module):
 
     def forward(self, x):
         return self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))
-
-
-LLAMA_ATTENTION_CLASSES = {
-    "eager": TPILlamaAttention,
-    "sdpa": TPILlamaSdpaAttention,
-}
 
 
 class TPILlamaDecoderLayer(nn.Module):
@@ -314,12 +259,13 @@ class TPILlamaDecoderLayer(nn.Module):
             num_heads=config.num_attention_heads,
             num_kv_heads=config.num_key_value_heads
         )
-        self.self_attn = LLAMA_ATTENTION_CLASSES["sdpa"](
+        self.self_attn = TPILlamaAttention(
             config=config,
             layer_idx=layer_idx,
             num_heads=heads_per_node[rank],
             num_kv_heads=kv_heads_per_node[rank],
             head_dim=head_dim,
+            attn_type=config._attn_implementation,
         )
 
         split_dims = (np.array(heads_per_node) * config.intermediate_size // sum(heads_per_node)).tolist()

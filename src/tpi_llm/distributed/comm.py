@@ -71,6 +71,7 @@ class CommunicatorMaster(CommunicatorBase):
         super().__init__(kvstore)
         self._world_size = world_size
         self._s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._s.bind((host, port))
         self._s.listen(world_size - 1)  # listen for all other nodes
 
