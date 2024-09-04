@@ -343,8 +343,6 @@ class TPILlamaDecoderLayer(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
-        self.mem_manager.track(f"self_attn.{self.layer_idx}")
-
         residual = hidden_states
 
         hidden_states = self.input_layernorm(hidden_states)
@@ -488,7 +486,6 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         hidden_states = inputs_embeds
         del inputs_embeds
 
-        _ = time.time()
         for decoder_layer in self.layers:
             layer_outputs = decoder_layer(
                 hidden_states,
@@ -503,7 +500,6 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
 
             if use_cache:
                 next_decoder_cache = layer_outputs[1]
-        print(time.time() - _)
 
         if self.rank == 0:
             hidden_states = self.norm(hidden_states)

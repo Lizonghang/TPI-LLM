@@ -21,7 +21,6 @@ class MemoryManager:
         self._model = model
         self._device = model.device
         self._rank = rank
-        self._disabled = args.disable_memory_schedule
         self._split_dir = os.path.join(args.model_path, args.save_dir, f"node_{rank}")
         self._all_layers = set(model.state_dict().keys())
         self._all_blocks = ["input"] + [
@@ -31,6 +30,8 @@ class MemoryManager:
         ] + ["output"]
         self._loaded_blocks: Deque[str] = deque(maxlen=args.memory_window)
         self._layers_in_block = {block_key: [] for block_key in self._all_blocks}
+        self._disabled = args.disable_memory_schedule
+        self._batch_loaded = False
 
     def _get_bid_and_btype(self, block_name: str) -> Tuple[int, str]:
         """
@@ -69,6 +70,9 @@ class MemoryManager:
         # ensure the block_name exists
         if block_name not in self._all_blocks:
             raise ValueError("Block name {} is not valid.".format(block_name))
+
+        if self._disabled and self._batch_loaded:
+            return
 
         # get the starting index of block_name
         start_idx = self._all_blocks.index(block_name)
@@ -120,8 +124,11 @@ class MemoryManager:
                     raise FileNotFoundError(f"Binary file {bin_path} not found.")
 
             # stop if the deque is full
-            if len(self._loaded_blocks) == self._loaded_blocks.maxlen:
+            if not self._disabled and len(self._loaded_blocks) == self._loaded_blocks.maxlen:
                 break
+
+        if self._disabled:
+            self._batch_loaded = True
 
     def _release_block(self, block_name: str):
         """
