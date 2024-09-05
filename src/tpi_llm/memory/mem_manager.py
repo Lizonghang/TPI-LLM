@@ -13,8 +13,6 @@ from ..utils import (
     OUTPUT_SAVE_PATH,
 )
 
-torch.set_num_threads(4)
-
 
 class MemoryManager:
     def __init__(self, model, rank, args):
@@ -181,7 +179,7 @@ class MemoryManager:
             self._load_block_until_filled(block_name)
 
         # Create a thread pool executor and run track function in the background using a thread pool
-        executor = ThreadPoolExecutor(max_workers=4)
+        executor = ThreadPoolExecutor(max_workers=1)
         loop = asyncio.get_event_loop()
         track_thread = loop.run_in_executor(executor, _track_func, block_name)
         if not async_op: self.wait(track_thread)
