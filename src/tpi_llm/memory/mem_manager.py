@@ -13,6 +13,8 @@ from ..utils import (
     OUTPUT_SAVE_PATH,
 )
 
+torch.set_num_threads(8)
+
 
 class MemoryManager:
     def __init__(self, model, rank, args):
