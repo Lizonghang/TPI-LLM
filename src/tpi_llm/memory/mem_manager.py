@@ -4,7 +4,7 @@ import torch
 import asyncio
 from typing import Tuple, Deque
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import ThreadPoolExecutor, Future, as_completed
 from ..utils import (
     BLOCK_TEMPLATE,
     ATTN_SAVE_PATH,
@@ -75,6 +75,19 @@ class MemoryManager:
         # get the starting index of block_name
         start_idx = self._all_blocks.index(block_name)
 
+        def _load_to_model(key, weight):
+            if key not in self._all_layers:
+                return
+
+            *module_names, param_name = key.split('.')
+            module = self._find_module(self._model, key)
+            module.register_parameter(
+                param_name,
+                torch.nn.Parameter(weight.float(), requires_grad=False)
+            )
+            if key not in self._layers_in_block[block_name_]:
+                self._layers_in_block[block_name_].append(key)
+
         # load blocks sequentially until the deque is full
         for idx in range(start_idx, len(self._all_blocks)):
             block_name_ = self._all_blocks[idx]
@@ -102,28 +115,24 @@ class MemoryManager:
 
             # load pretrained weights into model tensors
             try:
-                with open(bin_path, 'rb') as f:
+                with torch.no_grad(), open(bin_path, 'rb') as f:
                     pretrained_weights = torch.load(f, map_location=self._device)
 
-                for key, weight in pretrained_weights.items():
-                    if key in self._all_layers:
-                        *module_names, param_name = key.split('.')
-                        module = self._find_module(self._model, key)
-                        module.register_parameter(
-                            param_name,
-                            torch.nn.Parameter(weight.float(), requires_grad=False)
-                        )
-                        if key not in self._layers_in_block[block_name_]:
-                            self._layers_in_block[block_name_].append(key)
+                with ThreadPoolExecutor() as executor:
+                    futures = {executor.submit(_load_to_model, k, v): k
+                               for k, v in pretrained_weights.items()}
+
+                for future in as_completed(futures):
+                    future.result()
 
                 del pretrained_weights
+
+                # stop if the deque is full
+                if not self._disabled and len(self._loaded_blocks) == self._loaded_blocks.maxlen:
+                    break
             except FileNotFoundError:
                 if block_name_ != "output":
                     raise FileNotFoundError(f"Binary file {bin_path} not found.")
-
-            # stop if the deque is full
-            if not self._disabled and len(self._loaded_blocks) == self._loaded_blocks.maxlen:
-                break
 
         if self._disabled:
             self._batch_loaded = True
