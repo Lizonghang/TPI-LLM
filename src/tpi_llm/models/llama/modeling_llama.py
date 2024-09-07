@@ -289,44 +289,35 @@ class TPILlamaDecoderLayer(nn.Module):
         position_embeddings: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         **kwargs,
     ) -> Tuple[torch.FloatTensor, Optional[Tuple[torch.FloatTensor, torch.FloatTensor]]]:
+        # self-attention block
         residual = hidden_states
-
-        hidden_states = self.input_layernorm(hidden_states)
-
-        hidden_states, self_attn_weights, present_key_value = self.self_attn(
-            hidden_states=hidden_states,
-            attention_mask=attention_mask,
-            past_key_value=past_key_value,
-            use_cache=use_cache,
-            cache_position=cache_position,
-            position_embeddings=position_embeddings,
-            **kwargs,
-        )
-
-        # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        mem_thread = self.mem_manager.track(f"mlp.{self.layer_idx}", async_op=True)
-        hidden_states = self.comm.allreduce(hidden_states)  # this is a blocking op
-        self.mem_manager.wait(mem_thread)
-
+        # the loading of next block will overlap with allreduce operation
+        with self.mem_manager.wait_and_release(f"self_attn.{self.layer_idx}"):
+            hidden_states = self.input_layernorm(hidden_states)
+            hidden_states, self_attn_weights, present_key_value = self.self_attn(
+                hidden_states=hidden_states,
+                attention_mask=attention_mask,
+                past_key_value=past_key_value,
+                use_cache=use_cache,
+                cache_position=cache_position,
+                position_embeddings=position_embeddings,
+                **kwargs,
+            )
+        hidden_states = self.comm.allreduce(hidden_states)  # allreduce
         hidden_states = residual + hidden_states
 
-        # Fully Connected
+        # fully connected block
         residual = hidden_states
-        hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
-
-        # perform allreduce to sum up hidden_states, meanwhile load next blocks
-        mem_thread = self.mem_manager.track(f"self_attn.{self.layer_idx + 1}", async_op=True)
-        hidden_states = self.comm.allreduce(hidden_states)  # this is a blocking op
-        self.mem_manager.wait(mem_thread)
-
+        # the loading of next block will overlap with allreduce operation
+        with self.mem_manager.wait_and_release(f"mlp.{self.layer_idx}"):
+            hidden_states = self.post_attention_layernorm(hidden_states)
+            hidden_states = self.mlp(hidden_states)
+        hidden_states = self.comm.allreduce(hidden_states)  # allreudce
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
-
         if use_cache:
             outputs += (present_key_value,)
-
         return outputs
 
 
@@ -355,7 +346,6 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         self.master_ip = args.master_ip
         self.broadcast_port = args.broadcast_port
         self.world_size = args.world_size
-
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
         self.layers = nn.ModuleList([
             TPILlamaDecoderLayer(config, layer_idx, kvstore, communicator, rank, mem_manager, args)
@@ -406,10 +396,12 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         use_cache = use_cache if use_cache is not None else self.config.use_cache
         return_dict = return_dict if return_dict is not None else self.config.use_return_dict
 
+        self.mem_manager.start()
         if self.rank == 0:
             # notify the memory manager to load input embedding weights.
-            self.mem_manager.track("input")
-            inputs_embeds = self.embed_tokens(input_ids)
+            with self.mem_manager.wait_and_release("input"):
+                inputs_embeds = self.embed_tokens(input_ids)
+
             # tuple of 2 tensors with shape (bs, seq_len, head_dim)
             position_embeddings = self.rotary_emb(inputs_embeds, position_ids)
             causal_mask = self._update_causal_mask(
@@ -424,7 +416,6 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
             broadcast_data = [inputs_embeds, position_embeddings, cache_position, causal_mask]
             self.comm.broadcast(broadcast_data)
         else:
-            self.mem_manager.track("self_attn.0")
             broadcast_data = self.comm.request()
             inputs_embeds, position_embeddings, cache_position, causal_mask = broadcast_data
 
@@ -449,6 +440,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
                 next_decoder_cache = layer_outputs[1]
 
         if self.rank == 0:
+            self.mem_manager.wait("output")
             hidden_states = self.norm(hidden_states)
 
         next_cache = next_decoder_cache
@@ -477,8 +469,8 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         super().__init__(config)
         self.kvstore = kvstore
         self.rank = rank
-        mem_manager = MemoryManager(self, rank, args)
-        self.model = TPILlamaModel(config, kvstore, communicator, rank, mem_manager, args)
+        self.mem_manager = MemoryManager(self, rank, args)
+        self.model = TPILlamaModel(config, kvstore, communicator, rank, self.mem_manager, args)
         self.args = args
 
     def forward(
@@ -539,6 +531,7 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
 
         # master node returns output logits, past kv cache, and other info if needed.
         logits = self.lm_head(outputs[0]).float()
+        self.mem_manager.release("output")
 
         if not return_dict:
             return (logits,) + outputs[1:]
