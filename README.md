@@ -16,6 +16,7 @@ to speed up LLM inference.
 * 2024/08/26: Implement a file server to synchronize sliced model files to other nodes.
 * 2024/08/27: Add the MXNET KVSTORE backend.
 * 2024/09/01: Add the [NETSTORM](https://ieeexplore.ieee.org/document/10555207) KVSTORE backend.
+* 2024/09/07: Add support for deamon memory scheduling.
 
 # Installation
 ## Use the Source Code
