@@ -196,7 +196,7 @@ class MemoryManager:
                     param.data = None  # clear data in cuda memory, todo: this feature is not tested
                 torch.cuda.empty_cache()
             else:
-                del param  # clear data in cpu memory
+                del module._parameters[param_name]  # clear data in cpu memory
 
     def release_before(self, block_name: str):
         """
