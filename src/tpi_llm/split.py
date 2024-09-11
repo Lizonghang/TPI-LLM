@@ -74,7 +74,7 @@ def get_heads_per_node(world_size, ratio, num_heads=None, num_kv_heads=None):
         heads_per_node_ = [int(num_heads_ * r) for r in ratio]
         difference_ = num_heads_ - sum(heads_per_node_)
         for i in range(abs(difference_)):
-            heads_per_node_[i % world_size] += 1 if difference_ > 0 else -1
+            heads_per_node_[-i-1] += 1
         return heads_per_node_
 
     kv_heads_per_node = _allocate_heads(num_kv_heads) if num_kv_heads is not None else []
@@ -216,9 +216,9 @@ def split_mlp(weights, layer_num, heads_per_node, model_path, save_dir="split"):
     down_key = MLP_KEY_TEMPLATE.format(l=layer_num, type="down")
 
     # calculate the dimensions to split the weights according to heads_per_node
-    split_dims = (np.array(heads_per_node) * weights[gate_key].size(0) // sum(heads_per_node)).tolist()
+    split_dims = [weights[gate_key].size(0) // len(heads_per_node)] * len(heads_per_node)
     for i in range(weights[gate_key].size(0) - sum(split_dims)):
-        split_dims[i] += 1
+        split_dims[-i-1] += 1
     assert sum(split_dims) == weights[gate_key].size(0)
 
     # split gate_proj, up_proj, down_proj based on split_dims

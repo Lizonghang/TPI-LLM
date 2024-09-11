@@ -268,9 +268,9 @@ class TPILlamaDecoderLayer(nn.Module):
             attn_type=config._attn_implementation,
         )
 
-        split_dims = (np.array(heads_per_node) * config.intermediate_size // sum(heads_per_node)).tolist()
+        split_dims = [config.intermediate_size // args.world_size] * args.world_size
         for i in range(config.intermediate_size - sum(split_dims)):
-            split_dims[i] += 1
+            split_dims[-i-1] += 1
         if sum(split_dims) != config.intermediate_size:
             raise ValueError(
                 "The sum of `split_dims` must be equal to `intermediate_size` "
