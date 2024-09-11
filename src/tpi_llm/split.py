@@ -217,6 +217,8 @@ def split_mlp(weights, layer_num, heads_per_node, model_path, save_dir="split"):
 
     # calculate the dimensions to split the weights according to heads_per_node
     split_dims = (np.array(heads_per_node) * weights[gate_key].size(0) // sum(heads_per_node)).tolist()
+    for i in range(weights[gate_key].size(0) - sum(split_dims)):
+        split_dims[i] += 1
     assert sum(split_dims) == weights[gate_key].size(0)
 
     # split gate_proj, up_proj, down_proj based on split_dims
