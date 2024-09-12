@@ -21,10 +21,11 @@ if __name__ == "__main__":
     parser.add_argument("--file_port", type=int, default=29600, help="File server port.")
     parser.add_argument("--broadcast_port", type=int, default=29700, help="Broadcast server port.")
     parser.add_argument("--force_download", action="store_true", help="Force download sliced model files.")
-    # hyperparameters
+    # for output sampling
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--k", type=int, default=0)
     parser.add_argument("--p", type=float, default=0.9)
+    # for memory schedule
     parser.add_argument("--disable_memory_schedule", action="store_true")
     parser.add_argument("--memory_window", type=int, default=2,
                         help="Memory window size, should be at least 2.")
