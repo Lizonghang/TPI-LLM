@@ -1,11 +1,20 @@
 import socket
 import pickle
+import struct
+import logging
 import torch
 import mxnet as mx
 from mxnet import nd
 from mxnet.kvstore import KVStore
 from abc import ABC, abstractmethod
 from .utils import connect_with_retry
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+    datefmt="%m/%d/%Y %H:%M:%S",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
 
 
 class CommunicatorBase(ABC):
@@ -20,6 +29,7 @@ class CommunicatorBase(ABC):
 
     def __init__(self, kvstore: KVStore):
         self._kv = kvstore
+        self._s = None
 
     def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
         """
@@ -48,12 +58,12 @@ class CommunicatorBase(ABC):
         """
         pass
 
-    @abstractmethod
     def close(self):
         """
-        Abstract method for cleaning up the socket connection. Must be implemented by derived classes.
+        Clean up the socket connection.
         """
-        pass
+        if self._s is not None:
+            self._s.close()
 
 
 class CommunicatorMaster(CommunicatorBase):
@@ -74,6 +84,15 @@ class CommunicatorMaster(CommunicatorBase):
         self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self._s.bind((host, port))
         self._s.listen(world_size - 1)  # listen for all other nodes
+        self._client_sockets = {}
+
+    def _collect_sockets(self):
+        while len(self._client_sockets) < self._world_size - 1:
+            s, _ = self._s.accept()
+            rank = s.recv(4)
+            rank = struct.unpack("i", rank)[0]
+            self._client_sockets[s] = rank
+            logger.info(f"Rank {rank} connected to me.")
 
     def broadcast(self, data):
         """
@@ -83,39 +102,42 @@ class CommunicatorMaster(CommunicatorBase):
             data: The data to be broadcast.
         """
         # collect client connections first
-        client_sockets = []
-        while len(client_sockets) < self._world_size - 1:
-            client_socket, _ = self._s.accept()
-            client_sockets.append(client_socket)
+        self._collect_sockets()
 
         # send the data to all connected clients
-        serialized_data = pickle.dumps(data)
-        for client_socket in client_sockets:
-            client_socket.sendall(serialized_data)
-            client_socket.close()
+        if isinstance(data, int):
+            serialized_data = struct.pack("i", data)
+        else:
+            serialized_data = pickle.dumps(data)
+        data_len = struct.pack("i", len(serialized_data))
+        for s in self._client_sockets.keys():
+            s.sendall(data_len)  # meta head
+            s.sendall(serialized_data)  # data
 
     def barrier(self):
         """
         Synchronize all nodes by implementing a barrier. Collects BARRIER requests from workers
         and releases them once all have reached the barrier.
         """
+        # collect client connections first
+        self._collect_sockets()
+
         # collect BARRIER messages from all clients
-        barrier_clients = []
-        while len(barrier_clients) < self._world_size - 1:
-            client_socket, _ = self._s.accept()
-            message = client_socket.recv(8).decode("utf-8")
-            if message == "BARRIER":
-                barrier_clients.append(client_socket)
-            else:
-                raise ValueError(f"Received an unexpected message {message}.")
+        barrier_clients = set(self._client_sockets.keys())
+        received_clients = set()
+
+        while received_clients != barrier_clients:
+            for s in barrier_clients:
+                msg = s.recv(7).decode("utf-8")
+                assert msg == "BARRIER", f"Received an unexpected message {msg}."
+                assert s not in received_clients, \
+                    (f"Socket of rank {self._client_sockets[s]} has already been "
+                     f"barried! It may be barried twice.")
+                received_clients.add(s)
 
         # send ACK to each client to release them from the barrier
-        for client in barrier_clients:
-            client.sendall("ACK".encode("utf-8"))
-            client.close()
-
-    def close(self):
-        self._s.close()
+        for s in received_clients:
+            s.sendall("ACK".encode("utf-8"))
 
 
 class CommunicatorClient(CommunicatorBase):
@@ -127,11 +149,13 @@ class CommunicatorClient(CommunicatorBase):
         kvstore (KVStore): KVStore used for distributed key-value storage and synchronization.
         host (str): The host IP address of the master node.
         port (int): The port on which the master node is listening.
+        rank (int): My rank.
     """
-    def __init__(self, kvstore: KVStore, host: str, port: int):
+    def __init__(self, kvstore: KVStore, host: str, port: int, rank: int):
         super().__init__(kvstore)
         self._host = host
         self._port = port
+        self._rank = rank
 
     def request(self):
         """
@@ -140,32 +164,37 @@ class CommunicatorClient(CommunicatorBase):
         Returns:
             The broadcast data received from the master node.
         """
-        s = connect_with_retry(self._host, self._port)
+        # establish a long-term connection, if not already connected
+        if self._s is None:
+            self._s = connect_with_retry(self._host, self._port, self._rank)
+
+        # receive data length from meta info
+        data_len = self._s.recv(4)
+        data_len = struct.unpack("i", data_len)[0]
+
         # receive the data in chunks from the master node
         data = b""
-        while True:
-            packet = s.recv(4096)
+        while len(data) < data_len:
+            packet = self._s.recv(min(4096, data_len - len(data)))
             if not packet:
                 break
             data += packet
-        s.close()
-        return pickle.loads(data)
+
+        if data_len == 4:  # an integer received
+            return struct.unpack("i", data)[0]
+        return pickle.loads(data)  # a pickle object received
 
     def barrier(self):
         """
         Synchronize with the master node by sending a BARRIER request and waiting for an ACK.
         """
-        # connect to the master and send BARRIER message
-        s = connect_with_retry(self._host, self._port)
-        s.sendall("BARRIER".encode("utf-8"))
+        # establish a long-term connection, if not already connected
+        if self._s is None:
+            self._s = connect_with_retry(self._host, self._port, self._rank)
+
+        # send BARRIER message
+        self._s.sendall("BARRIER".encode("utf-8"))
 
         # wait for ACK response to exit the barrier
-        ack = s.recv(8).decode("utf-8")
-        if ack == "ACK":
-            s.close()
-        else:
-            raise ValueError(f"Received an unexpected message {ack}.")
-
-    def close(self):
-        # nothing to do with client
-        pass
+        ack = self._s.recv(3).decode("utf-8")
+        assert ack == "ACK", f"Received an unexpected message {ack}."

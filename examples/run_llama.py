@@ -78,7 +78,7 @@ def main(kvstore, my_rank, world_size, args):
         # ensure that the file download is executed after the master node binds its file port
         comm.barrier()
     else:  # for the non-master node
-        comm = CommunicatorClient(kvstore, args.master_ip, args.broadcast_port)
+        comm = CommunicatorClient(kvstore, args.master_ip, args.broadcast_port, my_rank)
         comm.barrier()
         # download sliced weight files from the master node
         if not os.path.exists(split_file_path) or args.force_download:
