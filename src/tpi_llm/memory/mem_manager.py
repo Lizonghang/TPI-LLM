@@ -190,13 +190,14 @@ class MemoryManager:
         for layer_key in self._layers_in_block[block_name]:
             module = self._find_module(self._model, layer_key)
             *module_names, param_name = layer_key.split('.')
-            param = module._parameters[param_name]
-            if param.device.type == "cuda":
+            # param = module._parameters[param_name]
+            if module._parameters[param_name].device.type == "cuda":
                 with torch.no_grad():
-                    param.data = None  # clear data in cuda memory, todo: this feature is not tested
+                    module._parameters[param_name].data = None  # clear data in cuda memory, todo: this feature is not tested
                 torch.cuda.empty_cache()
             else:
                 del module._parameters[param_name]  # clear data in cpu memory
+                print(f"block {block_name} key {layer_key} released")
 
     def release_before(self, block_name: str):
         """

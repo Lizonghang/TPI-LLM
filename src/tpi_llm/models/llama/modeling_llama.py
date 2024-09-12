@@ -244,6 +244,7 @@ class TPILlamaDecoderLayer(nn.Module):
         self.comm = communicator
         self.rank = rank
         self.mem_manager = mem_manager
+        self.slice_num = args.slice_num # add by fwj 0908
 
         self.hidden_size = config.hidden_size
         head_dim = config.hidden_size // config.num_attention_heads
@@ -305,7 +306,7 @@ class TPILlamaDecoderLayer(nn.Module):
                 position_embeddings=position_embeddings,
                 **kwargs,
             )
-        hidden_states = self.comm.allreduce(hidden_states)  # allreduce
+        hidden_states = self.comm.allreduce(hidden_states, self.slice_num)  # allreduce
         hidden_states = residual + hidden_states
 
         # fully connected block
@@ -314,7 +315,7 @@ class TPILlamaDecoderLayer(nn.Module):
         with self.mem_manager.wait_and_release(f"mlp.{self.layer_idx}"):
             hidden_states = self.post_attention_layernorm(hidden_states)
             hidden_states = self.mlp(hidden_states)
-        hidden_states = self.comm.allreduce(hidden_states)  # allreudce
+        hidden_states = self.comm.allreduce(hidden_states, self.slice_num)  # allreudce
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -427,6 +428,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         del inputs_embeds
 
         for decoder_layer in self.layers:
+            print("decoder_layer.layer_idx is ", decoder_layer.layer_idx)
             layer_outputs = decoder_layer(
                 hidden_states,
                 attention_mask=causal_mask,

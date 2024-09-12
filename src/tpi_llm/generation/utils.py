@@ -103,16 +103,24 @@ class TPIGenerationMixin(GenerationMixin):
                 # update generated ids, model inputs, and length for next step
                 input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
 
+                # if streamer is not None:
+                #     # the current token will not be printed immediately until the last space char,
+                #     # which is a simple heuristic to avoid printing incomplete words.
+                #     streamer.put(next_tokens.cpu())
+
                 if streamer is not None:
-                    # the current token will not be printed immediately until the last space char,
-                    # which is a simple heuristic to avoid printing incomplete words.
+                    token_string = next_tokens.cpu().numpy().tolist()
+                    file_path = '/root/TPI-LLM/output_tokens.log'
+                    with open(file_path, 'a') as f:
+                        f.write(str(token_string) + '\n')  
                     streamer.put(next_tokens.cpu())
 
                 model_kwargs = self._update_model_kwargs_for_generation(outputs, model_kwargs)
 
                 # update finish status and synchronize with other nodes
                 unfinished = unfinished & ~stopping_criteria(input_ids, scores)
-                communicator.broadcast(int(unfinished.cpu()))
+                communicator.broadcast(int(unfinished.cpu()))   
+                communicator.barrier()
 
                 # This is needed to properly delete outputs.logits which may be very large for first iteration
                 # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
@@ -128,7 +136,8 @@ class TPIGenerationMixin(GenerationMixin):
                 # assist forward pass to get next token
                 self(**model_kwargs)
                 # retrieve finish status from the master node
-                unfinished = communicator.request()
+                unfinished = communicator.request()    
+                communicator.barrier()    
 
     def _validate_input(self, input_tensor):
         """
