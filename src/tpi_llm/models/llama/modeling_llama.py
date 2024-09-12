@@ -123,30 +123,21 @@ class TPILlamaAttention(nn.Module):
         attn_type: str,
     ):
         super().__init__()
-        self.config = config
         self.layer_idx = layer_idx
-        self.attention_dropout = config.attention_dropout
-        self.hidden_size = config.hidden_size
         self.num_heads = num_heads
         self.head_dim = head_dim
         self.attn_type = attn_type
 
-        self.num_key_value_heads = num_kv_heads
-        self.num_key_value_groups, remainder = divmod(self.num_heads, self.num_key_value_heads)
+        self.num_kv_heads = num_kv_heads
+        self.num_kv_groups, remainder = divmod(num_heads, num_kv_heads)
         assert remainder == 0, \
-            (f"The value of num_heads ({self.num_heads}) must be divisible by "
-             f"num_key_value_heads ({self.num_key_value_heads}).")
+            (f"The value of num_heads ({num_heads}) must be divisible by "
+             f"num_key_value_heads ({num_kv_heads}).")
 
-        self.max_position_embeddings = config.max_position_embeddings
-        self.rope_theta = config.rope_theta
-        self.is_causal = True
-
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=config.attention_bias)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=config.attention_bias)
-        self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=config.attention_bias)
-
-        self.rotary_emb = LlamaRotaryEmbedding(config=self.config)
+        self.q_proj = nn.Linear(config.hidden_size, num_heads * head_dim, bias=config.attention_bias)
+        self.k_proj = nn.Linear(config.hidden_size, num_kv_heads * head_dim, bias=config.attention_bias)
+        self.v_proj = nn.Linear(config.hidden_size, num_kv_heads * head_dim, bias=config.attention_bias)
+        self.o_proj = nn.Linear(num_heads * head_dim, config.hidden_size, bias=config.attention_bias)
 
     def forward(
         self,
@@ -164,8 +155,8 @@ class TPILlamaAttention(nn.Module):
         value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-        key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-        value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
+        key_states = key_states.view(bsz, q_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
+        value_states = value_states.view(bsz, q_len, self.num_kv_heads, self.head_dim).transpose(1, 2)
 
         cos, sin = position_embeddings
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin)
@@ -173,8 +164,8 @@ class TPILlamaAttention(nn.Module):
         cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}
         key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        key_states = repeat_kv(key_states, self.num_key_value_groups)
-        value_states = repeat_kv(value_states, self.num_key_value_groups)
+        key_states = repeat_kv(key_states, self.num_kv_groups)
+        value_states = repeat_kv(value_states, self.num_kv_groups)
 
         causal_mask = attention_mask[:, :, :, : key_states.shape[-2]]
         if query_states.device.type == "cuda" and causal_mask is not None:
@@ -209,15 +200,11 @@ class TPILlamaAttention(nn.Module):
 
 class TPILlamaMLP(nn.Module):
 
-    def __init__(self, config: LlamaConfig, rank: int, split_dim: int):
+    def __init__(self, config: LlamaConfig, split_dim: int):
         super().__init__()
-        self.config = config
-        self.rank = rank
-        self.hidden_size = config.hidden_size
-        self.intermediate_size = split_dim
-        self.gate_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-        self.up_proj = nn.Linear(self.hidden_size, self.intermediate_size, bias=config.mlp_bias)
-        self.down_proj = nn.Linear(self.intermediate_size, self.hidden_size, bias=config.mlp_bias)
+        self.gate_proj = nn.Linear(config.hidden_size, split_dim, bias=config.mlp_bias)
+        self.up_proj = nn.Linear(config.hidden_size, split_dim, bias=config.mlp_bias)
+        self.down_proj = nn.Linear(split_dim, config.hidden_size, bias=config.mlp_bias)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
@@ -230,27 +217,22 @@ class TPILlamaDecoderLayer(nn.Module):
         self,
         config: LlamaConfig,
         layer_idx: int,
-        kvstore: KVStore,
         communicator: CommunicatorBase,
         rank: int,
         mem_manager: MemoryManager,
         args: argparse.Namespace
     ):
         super().__init__()
-        self.config = config
         self.layer_idx = layer_idx
-        self.kvstore = kvstore
         self.comm = communicator
-        self.rank = rank
         self.mem_manager = mem_manager
         self.slice_num = args.slice_num
 
-        self.hidden_size = config.hidden_size
         head_dim = config.hidden_size // config.num_attention_heads
-        if (head_dim * config.num_attention_heads) != self.hidden_size:
+        if (head_dim * config.num_attention_heads) != config.hidden_size:
             raise ValueError(
                 f"`hidden_size` must be divisible by the number of attention heads "
-                f"(got `hidden_size`: {self.hidden_size} and `num_heads`: {config.num_attention_heads})."
+                f"(got `hidden_size`: {config.hidden_size} and `num_heads`: {config.num_attention_heads})."
             )
 
         heads_per_node, kv_heads_per_node = get_heads_per_node(
@@ -276,7 +258,7 @@ class TPILlamaDecoderLayer(nn.Module):
                 "The sum of `split_dims` must be equal to `intermediate_size` "
                 f"(got `split_dims`: {split_dims}) and `intermediate_size`: {config.intermediate_size}.)"
             )
-        self.mlp = TPILlamaMLP(config, rank, split_dims[rank])
+        self.mlp = TPILlamaMLP(config, split_dims[rank])
 
         self.input_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
         self.post_attention_layernorm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -339,18 +321,12 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         args: argparse.Namespace
     ):
         super().__init__(config)
-        self.kvstore = kvstore
         self.comm = communicator
         self.rank = rank
         self.mem_manager = mem_manager
-        self.padding_idx = config.pad_token_id
-        self.vocab_size = config.vocab_size
-        self.master_ip = args.master_ip
-        self.broadcast_port = args.broadcast_port
-        self.world_size = args.world_size
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, self.padding_idx)
+        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         self.layers = nn.ModuleList([
-            TPILlamaDecoderLayer(config, layer_idx, kvstore, communicator, rank, mem_manager, args)
+            TPILlamaDecoderLayer(config, layer_idx, communicator, rank, mem_manager, args)
             for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -469,11 +445,9 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         args: argparse.Namespace
     ):
         super().__init__(config)
-        self.kvstore = kvstore
         self.rank = rank
         self.mem_manager = MemoryManager(self, rank, args)
         self.model = TPILlamaModel(config, kvstore, communicator, rank, self.mem_manager, args)
-        self.args = args
 
     def forward(
         self,
@@ -525,10 +499,8 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
             cache_position=cache_position,
         )
 
-        my_rank = self.rank
-
         # non-master nodes return nothing.
-        if my_rank != 0:
+        if self.rank != 0:
             return None
 
         # master node returns output logits, past kv cache, and other info if needed.
