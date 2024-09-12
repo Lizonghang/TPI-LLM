@@ -35,6 +35,7 @@ if __name__ == "__main__":
     args.rank = int(os.environ["RANK"])
     args.world_size = kvstore.num_workers
     args.master_ip = os.environ["MASTER_ADDR"]
+    args.slice_num = int(os.environ["NUM_ENABLE_SERVER"])
 
     # run inference
     main(kvstore, args.rank, args.world_size, args)

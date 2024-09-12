@@ -21,25 +21,105 @@ class CommunicatorBase(ABC):
     def __init__(self, kvstore: KVStore):
         self._kv = kvstore
 
-    def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
+    # def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
+    #     """
+    #     Perform an allreduce operation using KVStore on a PyTorch tensor across distributed nodes.
+
+    #     Args:
+    #         tensor (torch.Tensor): The tensor to be all-reduced across nodes.
+
+    #     Returns:
+    #         torch.Tensor: The reduced tensor, synchronized across all nodes.
+    #     """
+    #     # convert torch.Tensor to a DLPack tensor and then to an MXNet NDArray
+    #     tensor_np = tensor.detach().cpu().numpy()
+    #     tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
+    #     # perform allreduce, 1 for prefilling and 0 for decoding
+    #     key = str(int(tensor.size(1) > 1))
+    #     self._kv.push(key, tensor_nd)
+    #     self._kv.pull(key, out=tensor_nd)
+    #     # convert the reduced MXNet NDArray back to a PyTorch tensor
+    #     return torch.from_numpy(tensor_nd.asnumpy()).to(tensor.device)
+
+    def allreduce(self, tensor: torch.Tensor, slice_num: int) -> torch.Tensor:
         """
-        Perform an allreduce operation using KVStore on a PyTorch tensor across distributed nodes.
+        Perform an allreduce operation using KVStore on a PyTorch tensor across distributed nodes,
+        slicing the tensor into a specified number of evenly-sized slices across multiple dimensions.
 
         Args:
             tensor (torch.Tensor): The tensor to be all-reduced across nodes.
+            slice_num (int): The number of slices to divide the tensor into.
 
         Returns:
             torch.Tensor: The reduced tensor, synchronized across all nodes.
         """
-        # convert torch.Tensor to a DLPack tensor and then to an MXNet NDArray
+        # Convert PyTorch tensor to a NumPy array and then to an MXNet NDArray
         tensor_np = tensor.detach().cpu().numpy()
         tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
-        # perform allreduce, 1 for prefilling and 0 for decoding
-        key = str(int(tensor.size(1) > 1))
-        self._kv.push(key, tensor_nd)
-        self._kv.pull(key, out=tensor_nd)
-        # convert the reduced MXNet NDArray back to a PyTorch tensor
-        return torch.from_numpy(tensor_nd.asnumpy()).to(tensor.device)
+
+        # Calculate total number of elements in the tensor
+        total_elements = tensor_nd.size
+        slice_size = total_elements // slice_num
+        remainder = total_elements % slice_num
+        print("total_elements is ", total_elements)
+        print("slice_size is ", slice_size)
+        print("remainder is ", remainder)
+
+
+        # Flatten the tensor to perform even slicing
+        flattened_tensor = tensor_nd.flatten().reshape(-1)
+        print("flattened_tensor len is ", len(flattened_tensor))
+        print("flattened_tensor shape is ", flattened_tensor.shape)
+
+        # Initialize a list to store each slice
+        slices = []
+        start = 0
+
+        # Slice the flattened tensor into approximately equal parts
+        for i in range(slice_num):
+            # Determine the size of the current slice
+            current_slice_size = slice_size + (1 if i < remainder else 0)
+            end = start + current_slice_size
+            print("start is ", start)
+            print("end is ", end)
+
+            # Extract the slice and reshape it back to its original multi-dimensional form
+            slice_nd = flattened_tensor[start:end].reshape(-1)
+            slices.append(slice_nd)
+
+            # Push and pull operations for each slice
+            key = str(i)  # Unique key for each slice
+            print("slice_nd is ", len(slice_nd))
+            print("key is " ,key)
+
+            try:
+                print("already init",key)
+                self._kv.push(key, slice_nd)
+                nd.waitall()
+                self._kv.pull(key, out=slice_nd)
+                nd.waitall()
+            except mx.base.MXNetError:  # the key may not be initialized
+                decoder_key = str(i + slice_num)
+                print("it is decoder layer,key is ", decoder_key)
+                # self._kv.init(key, nd.zeros_like(slice_nd))  # only kv.rank 0 will execute initialization
+                # nd.waitall()
+                # self.barrier()  # make sure kvstore init is complete before retrying
+                print("start push",decoder_key)
+                self._kv.push(decoder_key, slice_nd)
+                nd.waitall()
+                self._kv.pull(decoder_key, out=slice_nd)
+                nd.waitall()
+                print("finish pull",decoder_key)
+
+
+            # Update the start index for the next slice
+            start = end
+
+        # Concatenate all slices back together and reshape to the original tensor's shape
+        reduced_tensor = nd.concat(*slices, dim=0).reshape(tensor_nd.shape)
+
+        # Convert the reduced MXNet NDArray back to a PyTorch tensor
+        return torch.from_numpy(reduced_tensor.asnumpy()).to(tensor.device)
 
     @abstractmethod
     def barrier(self):
