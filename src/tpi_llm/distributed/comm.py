@@ -162,12 +162,18 @@ class CommunicatorMaster(CommunicatorBase):
         Args:
             data: The data to be broadcast.
         """
-        connected_clients = 0
-        while connected_clients < self._world_size - 1:
+        # collect client connections first
+        client_sockets = []
+        while len(client_sockets) < self._world_size - 1:
             client_socket, _ = self._s.accept()
-            client_socket.sendall(pickle.dumps(data))
+            client_sockets.append(client_socket)
+
+        # send the data to all connected clients
+        serialized_data = pickle.dumps(data)
+        for client_socket in client_sockets:
+            client_socket.sendall(serialized_data)
             client_socket.close()
-            connected_clients += 1
+
 
     def barrier(self):
         """
@@ -188,7 +194,6 @@ class CommunicatorMaster(CommunicatorBase):
         for client in barrier_clients:
             client.sendall("ACK".encode("utf-8"))
             client.close()
-        barrier_clients.clear()
 
     def close(self):
         self._s.close()
