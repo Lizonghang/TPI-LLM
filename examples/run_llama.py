@@ -138,23 +138,17 @@ def main(kvstore, my_rank, world_size, args):
         args=args
     )
 
-    # init kvstore, 1 for prefilling and 0 for decoding,
-    # note: only kv.rank 0 will execute initialization, not rank 0.
-    # kvstore.init("1", nd.zeros((1, input_len, model.config.hidden_size)))
-    # kvstore.init("0", nd.zeros((1, 1, model.config.hidden_size)))
-
-    for i in range(args.slice_num):
-        kvstore.init(str(i), nd.zeros((1, 1, input_len * model.config.hidden_size //args.slice_num)))
-        print("init finish key ", i)
-        print("len is ", input_len * model.config.hidden_size //args.slice_num)
-    # nd.waitall()
-    # time.sleep(5) 
-    for i in range(args.slice_num, args.slice_num*2):
-        kvstore.init(str(i), nd.zeros((1, 1, model.config.hidden_size //args.slice_num)))
-        print("init finish key ", i)
-        print("len is ", model.config.hidden_size //args.slice_num)
-    # nd.waitall()
-    # time.sleep(5)  
+    # for multi-root allreduce
+    # todo (wenjiao): check if nd.zeros((1, len_ * model.config.hidden_size // args.slice_num)) works.
+    # todo (wenjiao): check if input_len * model.config.hidden_size is not divisible by args.slice_num.
+    # todo (wenjiao): check if input_len is 1.
+    for slice_idx in range(args.slice_num * 2):
+        # input_len for prefilling and 1 for decoding
+        len_ = input_len if slice_idx < args.slice_num else 1
+        kvstore.init(
+            str(slice_idx),
+            nd.zeros((1, 1, len_ * model.config.hidden_size // args.slice_num)),
+        )
     comm.barrier()  # make sure kvstore init is complete before push/pull
 
     # generate output with streaming output

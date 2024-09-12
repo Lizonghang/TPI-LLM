@@ -164,6 +164,10 @@ the slices before, you can use the `--force_download` option to force a re-downl
 ## Run on Klonet
 Coming soon.
 
+Environment Variables:
+
+`NUM_NS_ROOTS`: The number of allreduce roots, default to be 1.
+
 ## Optional Arguments
 TPI-LLM provides several optional parameters that you can customize to control various aspects of the inference process. 
 Below is a list of these options:

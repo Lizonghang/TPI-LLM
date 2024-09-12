@@ -103,16 +103,9 @@ class TPIGenerationMixin(GenerationMixin):
                 # update generated ids, model inputs, and length for next step
                 input_ids = torch.cat([input_ids, next_tokens[:, None]], dim=-1)
 
-                # if streamer is not None:
-                #     # the current token will not be printed immediately until the last space char,
-                #     # which is a simple heuristic to avoid printing incomplete words.
-                #     streamer.put(next_tokens.cpu())
-
                 if streamer is not None:
-                    token_string = next_tokens.cpu().numpy().tolist()
-                    file_path = '/root/TPI-LLM/output_tokens.log'
-                    with open(file_path, 'a') as f:
-                        f.write(str(token_string) + '\n')  
+                    # the current token will not be printed immediately until the last space char,
+                    # which is a simple heuristic to avoid printing incomplete words.
                     streamer.put(next_tokens.cpu())
 
                 model_kwargs = self._update_model_kwargs_for_generation(outputs, model_kwargs)
