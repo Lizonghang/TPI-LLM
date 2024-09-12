@@ -119,8 +119,7 @@ class TPIGenerationMixin(GenerationMixin):
 
                 # update finish status and synchronize with other nodes
                 unfinished = unfinished & ~stopping_criteria(input_ids, scores)
-                communicator.broadcast(int(unfinished.cpu()))   
-                communicator.barrier()
+                communicator.broadcast(int(unfinished.cpu()))
 
                 # This is needed to properly delete outputs.logits which may be very large for first iteration
                 # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
@@ -136,8 +135,7 @@ class TPIGenerationMixin(GenerationMixin):
                 # assist forward pass to get next token
                 self(**model_kwargs)
                 # retrieve finish status from the master node
-                unfinished = communicator.request()    
-                communicator.barrier()    
+                unfinished = communicator.request()
 
     def _validate_input(self, input_tensor):
         """
