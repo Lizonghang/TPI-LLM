@@ -138,17 +138,14 @@ def main(kvstore, my_rank, world_size, args):
         args=args
     )
 
-    # for multi-root allreduce
-    # todo (wenjiao): check if nd.zeros((1, len_ * model.config.hidden_size // args.slice_num)) works.
-    # todo (wenjiao): check if input_len * model.config.hidden_size is not divisible by args.slice_num.
-    # todo (wenjiao): check if input_len is 1.
-    for slice_idx in range(args.slice_num * 2):
-        # input_len for prefilling and 1 for decoding
-        len_ = input_len if slice_idx < args.slice_num else 1
-        kvstore.init(
-            str(slice_idx),
-            nd.zeros((1, 1, len_ * model.config.hidden_size // args.slice_num)),
-        )
+    # init kvstore under multi-root setting
+    # if input_len > 1, 0 ~ slice_num for decoding and slice_num ~ 2 * slice_num for prefilling
+    # if input_len = 1, 0 ~ slice_num is shared by prefilling and decoding
+    for slice_idx in range(args.slice_num * (2 if input_len > 1 else 1)):
+        len_ = 1 if input_len > 1 and slice_idx < args.slice_num else input_len
+        size_, remainder_ = divmod(len_ * model.config.hidden_size, args.slice_num)
+        size_ += int(slice_idx % args.slice_num < remainder_)
+        kvstore.init(str(slice_idx), nd.zeros(size_))
     comm.barrier()  # make sure kvstore init is complete before push/pull
 
     # generate output with streaming output

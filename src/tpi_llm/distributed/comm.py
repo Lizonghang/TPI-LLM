@@ -46,16 +46,9 @@ class CommunicatorBase(ABC):
         # convert PyTorch tensor to a NumPy array and then to an MXNet NDArray
         tensor_np = tensor.detach().cpu().numpy()
         tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
+        data_vec = tensor_nd.reshape(-1)
 
-        # calculate total number of elements in the tensor
-        total_elements = tensor_nd.size
-        slice_size = total_elements // slice_num
-        remainder = total_elements % slice_num
-
-        # flatten the tensor
-        flattened_tensor = tensor_nd.flatten().reshape(-1)
-
-        # initialize a list to store each slice
+        slice_size, remainder = divmod(tensor_nd.size, slice_num)
         slices = []
         start = 0
 
@@ -65,35 +58,26 @@ class CommunicatorBase(ABC):
             current_slice_size = slice_size + (1 if i < remainder else 0)
             end = start + current_slice_size
 
-            # extract the slice and reshape it back to its original multi-dimensional form
-            slice_nd = flattened_tensor[start:end].reshape(-1)
+            # extract the slice
+            slice_nd = data_vec[start:end]
             slices.append(slice_nd)
 
-            # push and pull operations for each slice
-            key = str(i)  # Unique key for each slice
+            # do push pull for each slice
+            # if input_len > 1, 0 ~ slice_num for decoding and slice_num ~ 2 * slice_num for prefilling
+            # if input_len = 1, 0 ~ slice_num is shared by prefilling and decoding
+            key = str(i + slice_num) if tensor.size(1) > 1 else str(i)
+            self._kv.push(key, slice_nd)
+            nd.waitall()
+            self._kv.pull(key, out=slice_nd)
+            nd.waitall()
 
-            # todo (wenjiao): use if-else instead to avoid potential crashes.
-            # todo (wenjiao): do prefilling if tensor.size(1) > 1, otherwise do decoding.
-            # todo (wenjiao): consider the case that tensor.size(1) is always 1 (i.e., input_len is 1).
-            try:  # prefilling
-                self._kv.push(key, slice_nd)
-                nd.waitall()
-                self._kv.pull(key, out=slice_nd)
-                nd.waitall()
-            except mx.base.MXNetError:  # decoding
-                decoder_key = str(i + slice_num)
-                self._kv.push(decoder_key, slice_nd)
-                nd.waitall()
-                self._kv.pull(decoder_key, out=slice_nd)
-                nd.waitall()
-
-            # Update the start index for the next slice
+            # update the start index for the next slice
             start = end
 
-        # Concatenate all slices back together and reshape to the original tensor's shape
+        # concatenate all slices and reshape back to the original shape
         reduced_tensor = nd.concat(*slices, dim=0).reshape(tensor_nd.shape)
 
-        # Convert the reduced MXNet NDArray back to a PyTorch tensor
+        # convert the reduced MXNet NDArray back to a PyTorch tensor
         return torch.from_numpy(reduced_tensor.asnumpy()).to(tensor.device)
 
     @abstractmethod

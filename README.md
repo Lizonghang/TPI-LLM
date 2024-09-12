@@ -166,7 +166,7 @@ Coming soon.
 
 Environment Variables:
 
-`NUM_NS_ROOTS`: The number of allreduce roots, default to be 1.
+`NUM_NS_ROOTS`: The number of allreduce roots, default to 1.
 
 ## Optional Arguments
 TPI-LLM provides several optional parameters that you can customize to control various aspects of the inference process. 
