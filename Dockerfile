@@ -17,7 +17,8 @@ RUN apt update && \
           openssh-server \
           iputils-ping \
           net-tools \
-          htop && \
+          htop \
+          bc && \
     apt clean && \
     rm -rf /var/lib/apt/lists/*
 
