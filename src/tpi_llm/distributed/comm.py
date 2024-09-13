@@ -63,9 +63,9 @@ class CommunicatorBase(ABC):
             slices.append(slice_nd)
 
             # do push pull for each slice
-            # if input_len > 1, 0 ~ slice_num for decoding and slice_num ~ 2 * slice_num for prefilling
+            # if input_len > 1, 0 ~ slice_num for prefilling and slice_num ~ 2 * slice_num for decoding
             # if input_len = 1, 0 ~ slice_num is shared by prefilling and decoding
-            key = str(i + slice_num) if tensor.size(1) > 1 else str(i)
+            key = str(i + slice_num) if tensor.size(1) == 1 else str(i)
             self._kv.push(key, slice_nd)
             nd.waitall()
             self._kv.pull(key, out=slice_nd)

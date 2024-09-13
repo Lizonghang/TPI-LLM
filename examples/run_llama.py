@@ -139,10 +139,10 @@ def main(kvstore, my_rank, world_size, args):
     )
 
     # init kvstore under multi-root setting
-    # if input_len > 1, 0 ~ slice_num for decoding and slice_num ~ 2 * slice_num for prefilling
+    # if input_len > 1, 0 ~ slice_num for prefilling and slice_num ~ 2 * slice_num for decoding
     # if input_len = 1, 0 ~ slice_num is shared by prefilling and decoding
     for slice_idx in range(args.slice_num * (2 if input_len > 1 else 1)):
-        len_ = 1 if input_len > 1 and slice_idx < args.slice_num else input_len
+        len_ = 1 if input_len > 1 and slice_idx >= args.slice_num else input_len
         size_, remainder_ = divmod(len_ * model.config.hidden_size, args.slice_num)
         size_ += int(slice_idx % args.slice_num < remainder_)
         kvstore.init(str(slice_idx), nd.zeros(size_))
