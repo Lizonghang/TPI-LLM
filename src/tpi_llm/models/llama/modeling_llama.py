@@ -217,7 +217,7 @@ class TPILlamaDecoderLayer(nn.Module):
         config: LlamaConfig,
         rank: int,
         layer_idx: int,
-        communicator: CommunicatorBase,
+        communicator: Union[CommunicatorBase, "module"],
         mem_manager: MemoryManager,
         args: argparse.Namespace
     ):
@@ -286,7 +286,7 @@ class TPILlamaDecoderLayer(nn.Module):
                 position_embeddings=position_embeddings,
                 **kwargs,
             )
-        hidden_states = self.comm.allreduce(hidden_states)  # allreduce
+        self.comm.all_reduce(hidden_states)  # allreduce
         hidden_states = residual + hidden_states
 
         # fully connected block
@@ -295,7 +295,7 @@ class TPILlamaDecoderLayer(nn.Module):
         with self.mem_manager.wait_and_release(f"mlp.{self.layer_idx}"):
             hidden_states = self.post_attention_layernorm(hidden_states)
             hidden_states = self.mlp(hidden_states)
-        hidden_states = self.comm.allreduce(hidden_states)  # allreudce
+        self.comm.all_reduce(hidden_states)  # allreduce
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -314,7 +314,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         self,
         config: LlamaConfig,
         rank: int,
-        communicator: CommunicatorBase,
+        communicator: Union[CommunicatorBase, "module"],
         mem_manager: MemoryManager,
         args: argparse.Namespace
     ):
@@ -385,14 +385,17 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
 
             # the master node broadcasts inputs_embeds, position_embedding, cache_position,
             # and causal_mask to all other nodes.
-            # shape of inputs_embeds: (bs, seq_len, hidden_size)
-            # shape of position_embeddings: 2 Tuples of shape (bs, seq_len, head_dim)
-            # shape of cache_position: (seq_len,)
-            # shape of causal_mask: (1, 1, seq_len, seq_len)
             broadcast_data = [inputs_embeds, position_embeddings, cache_position, causal_mask]
-            self.comm.broadcast(broadcast_data)
+            if isinstance(self.comm, CommunicatorBase):
+                self.comm.broadcast(broadcast_data)
+            else:
+                self.comm.broadcast_object_list(broadcast_data, src=0)
         else:
-            broadcast_data = self.comm.request()
+            if isinstance(self.comm, CommunicatorBase):
+                broadcast_data = self.comm.request()
+            else:  # use torch.distributed.broadcast_object_list
+                broadcast_data = [None, None, None, None]
+                self.comm.broadcast_object_list(broadcast_data, src=0)
             inputs_embeds, position_embeddings, cache_position, causal_mask = broadcast_data
 
         # decoder layers
@@ -437,7 +440,7 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
     def __init__(
         self,
         config: LlamaConfig,
-        communicator: CommunicatorBase,
+        communicator: Union[CommunicatorBase, "module"],
         rank: int,
         args: argparse.Namespace
     ):

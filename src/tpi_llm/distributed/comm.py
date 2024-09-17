@@ -25,9 +25,10 @@ class CommunicatorBase(ABC):
         self._s = None
 
     @abstractmethod
-    def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
+    def all_reduce(self, tensor: torch.Tensor) -> torch.Tensor:
         """
         Perform an allreduce operation on a PyTorch tensor across distributed nodes.
+        This is an in-place operation.
 
         Args:
             tensor (torch.Tensor): The tensor to be all-reduced across nodes.
@@ -85,6 +86,7 @@ class CommunicatorMaster(CommunicatorBase):
 
         Args:
             data: The data to be broadcast, can be any type.
+            src (not used): For compatibility with torch.distributed.broadcast.
         """
         # collect client connections first
         self._collect_sockets()
@@ -98,9 +100,10 @@ class CommunicatorMaster(CommunicatorBase):
         for s in self._client_sockets.keys():
             s.sendall(data_len + serialized_data)  # data
 
-    def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
+    def all_reduce(self, tensor: torch.Tensor):
         """
         Perform an allreduce operation on a PyTorch tensor across distributed nodes.
+        This is an in-place operation.
         """
         # collect client connections first
         self._collect_sockets()
@@ -115,14 +118,14 @@ class CommunicatorMaster(CommunicatorBase):
                 assert len(recv_data) == head_len, f"Received {len(recv_data)} bytes, expected {head_len} bytes"
                 assert s not in received_clients, f"Worker {self._client_sockets[s]} has already sent before."
                 received_clients.add(s)
-                tensor += pickle.loads(recv_data)
+                recv_tensor = pickle.loads(recv_data)
+                tensor.add_(recv_tensor)
 
         # send reduced result to all clients
         for s in received_clients:
             serialized_data = pickle.dumps(tensor)
             head_len = struct.pack("i", len(serialized_data))
             s.sendall(head_len + serialized_data)
-        return tensor
 
     def barrier(self):
         """
@@ -187,9 +190,10 @@ class CommunicatorClient(CommunicatorBase):
             return struct.unpack("i", data)[0]
         return pickle.loads(data)  # a pickle object received
 
-    def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
+    def all_reduce(self, tensor: torch.Tensor):
         """
         Perform an allreduce operation on a PyTorch tensor across distributed nodes.
+        This is an in-place operation.
         """
         # establish a long-term connection, if not already connected
         if self._s is None:
@@ -203,7 +207,8 @@ class CommunicatorClient(CommunicatorBase):
         # receive the data in chunks from the master node
         head_len = struct.unpack("i", recv_data_chunk(self._s, 4))[0]
         data = recv_data_chunk(self._s, head_len)
-        return pickle.loads(data)
+        recv_tensor = pickle.loads(data)
+        tensor.copy_(recv_tensor)
 
     def barrier(self):
         """

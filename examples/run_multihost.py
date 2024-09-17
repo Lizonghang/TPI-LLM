@@ -20,6 +20,7 @@ if __name__ == "__main__":
     parser.add_argument("--length", type=int, default=20)
     parser.add_argument("--prefix", type=str, default="", help="Text added prior to input.")
     parser.add_argument("--use_gpu", action="store_true", help="Whether to use gpu, default to use cpu.")
+    parser.add_argument("--torch_dist", action="store_true", help="Whether to use torch distributed.")
     parser.add_argument("--split_bin", action="store_true", help="Whether to split the model file.")
     parser.add_argument("--save_dir", type=str, default="split", help="Directory to save split models.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed.")
@@ -32,5 +33,12 @@ if __name__ == "__main__":
                         help="Memory window size, should be at least 2.")
     args = parser.parse_args()
 
+    dist = None
+    if args.torch_dist:
+        import torch.distributed as dist
+        os.environ["MASTER_ADDR"] = args.master_ip
+        os.environ["MASTER_PORT"] = str(args.master_port)
+        dist.init_process_group("gloo", "env://", rank=args.rank, world_size=args.world_size)
+
     # run inference
-    main(args.rank, args)
+    main(args.rank, args, dist=dist)

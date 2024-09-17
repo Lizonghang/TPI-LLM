@@ -1,7 +1,7 @@
 import inspect
 import torch
 from torch import nn
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Union
 from transformers import (
     GenerationMixin,
     GenerationConfig,
@@ -9,6 +9,7 @@ from transformers import (
     StoppingCriteriaList,
     DynamicCache,
 )
+from ..distributed import CommunicatorBase
 
 
 class TPIGenerationMixin(GenerationMixin):
@@ -19,7 +20,7 @@ class TPIGenerationMixin(GenerationMixin):
         stopping_criteria: StoppingCriteriaList,
         generation_config: GenerationConfig,
         streamer: Optional["BaseStreamer"],
-        communicator: Optional["BaseCommunicator"],
+        communicator: Optional[Union[CommunicatorBase, "module"]],
         logits_warper: Optional[LogitsProcessorList],
         **model_kwargs,
     ) -> torch.LongTensor:
@@ -40,7 +41,7 @@ class TPIGenerationMixin(GenerationMixin):
                 Configuration parameters for the generation process.
             streamer (Optional[BaseStreamer]):
                 Optional streamer to stream the generated sequences.
-            communicator (Optional[BaseCommunicator]):
+            communicator (Optional[Union[CommunicatorBase, module]]):
                 Optional communicator to use for broadcast, request, and barrier.
             logits_warper (Optional[LogitsProcessorList]):
                 A list of processors used to adjust the prediction scores before multinomial sampling, required
@@ -112,7 +113,11 @@ class TPIGenerationMixin(GenerationMixin):
 
                 # update finish status and synchronize with other nodes
                 unfinished = unfinished & ~stopping_criteria(input_ids, scores)
-                communicator.broadcast(int(unfinished.cpu()))
+
+                if isinstance(communicator, CommunicatorBase):
+                    communicator.broadcast(int(unfinished.cpu()))
+                else:  # use torch.distributed.broadcast_object_list
+                    communicator.broadcast_object_list([unfinished.cpu()], src=0)
 
                 # This is needed to properly delete outputs.logits which may be very large for first iteration
                 # Otherwise a reference to outputs is kept which keeps the logits alive in the next iteration
@@ -128,7 +133,12 @@ class TPIGenerationMixin(GenerationMixin):
                 # assist forward pass to get next token
                 self(**model_kwargs)
                 # retrieve finish status from the master node
-                unfinished = communicator.request()
+                if isinstance(communicator, CommunicatorBase):
+                    unfinished = communicator.request()
+                else:  # use torch.distributed.broadcast_object_list
+                    recv_data = [torch.ones(1, dtype=torch.long)]
+                    communicator.broadcast_object_list(recv_data, src=0)
+                    unfinished = recv_data[0].item()
 
     def _validate_input(self, input_tensor):
         """
@@ -161,7 +171,7 @@ class TPIGenerationMixin(GenerationMixin):
         stopping_criteria: Optional[StoppingCriteriaList] = None,
         prefix_allowed_tokens_fn: Optional[Callable[[int, torch.Tensor], List[int]]] = None,
         streamer: Optional["BaseStreamer"] = None,
-        communicator: Optional["BaseCommunicator"] = None,
+        communicator: Optional[Union[CommunicatorBase, "module"]] = None,
         **kwargs,
     ) -> torch.LongTensor:
         """
@@ -184,7 +194,7 @@ class TPIGenerationMixin(GenerationMixin):
             streamer (Optional["BaseStreamer"]):
                 An optional streamer object that allows for processing or outputting the generated tokens in real-time
                 (e.g., streaming generation results). Defaults to None.
-            communicator (Optional["BaseCommunicator"]):
+            communicator (Optional[Union[CommunicatorBase, module]]):
                 An optional communicator object that supports broadcast, request, and barrier. Defaults to None.
             **kwargs:
                 Additional keyword arguments that can include model-specific parameters or be used to

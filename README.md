@@ -151,3 +151,4 @@ Below is a list of these options:
 | `--p`                       | `0.9`     | `float` | Cumulative probability for nucleus sampling (top-p). (available only on the master node)             |
 | `--disable_memory_schedule` | `False`   | `bool`  | Set to True to disable memory window scheduling, this may lead to higher speed.                      |
 | `--memory_window`           | `2`       | `int`   | Size of the memory window used during inference. Should be at least 2.                               |
+| `--torch_dist`              | `False`   | `bool`  | Whether to use torch.distributed.                                                                    |

@@ -8,6 +8,7 @@ from tpi_llm.modeling_utils import load_model_config
 from tpi_llm.distributed import (
     run_sync_server,
     download_file,
+    CommunicatorBase,
     CommunicatorMaster,
     CommunicatorClient,
 )
@@ -45,7 +46,7 @@ def adjust_length_to_model(length, max_sequence_length):
     return length
 
 
-def main(my_rank, args):
+def main(my_rank, args, dist=None):
     # set random seeds for reproducibility
     torch.manual_seed(args.seed)
     if args.use_gpu:
@@ -60,7 +61,7 @@ def main(my_rank, args):
                             f"please download the pretrained model parameters first.")
 
         # initialize communicator for master node
-        comm = CommunicatorMaster(args.master_ip, args.master_port, args.world_size)
+        comm = dist or CommunicatorMaster(args.master_ip, args.master_port, args.world_size)
 
         # split the pretrained model files if not split or forced to split
         if not os.path.exists(split_file_path) or args.split_bin:
@@ -76,7 +77,7 @@ def main(my_rank, args):
         run_sync_server(args.master_ip, args.file_port, args.model_path, split_file_path)
         # ensure that the file download is executed after the master node binds its file port
     else:  # for the non-master node
-        comm = CommunicatorClient(args.master_ip, args.master_port, my_rank)
+        comm = dist or CommunicatorClient(args.master_ip, args.master_port, my_rank)
         # download sliced weight files from the master node
         if not os.path.exists(split_file_path) or args.force_download:
             os.makedirs(os.path.join(split_file_path, f"node_{my_rank}"), exist_ok=True)
@@ -138,4 +139,5 @@ def main(my_rank, args):
 
     # stop running threads for a graceful exit
     model.mem_manager.stop()
-    comm.close()
+    if isinstance(comm, CommunicatorBase):
+        comm.close()
