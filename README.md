@@ -72,32 +72,20 @@ To get started, you’ll need to download the pretrained model weights from **Hu
 
 After downloading, save the model files in a directory of your choice, which we’ll refer to as `<PATH-TO-MODEL-FILES>`.
 
-## Run on Multiple Hosts
-Assume we have 2 hosts with IP addresses as follows:
+## Run on Your Laptop
+Run the example script for a trial:
 
-```text
-IP of host 1: 172.17.0.3 (master node)
-IP of host 2: 172.17.0.4 (worker node)
-```
-
-The master node is regarded as the task publisher, who initiates the input prompt and display output
-test stream to users, at the meantime it will slice the pretrained model weight files and serve as a file
-server to send the sliced model weights to other worker nodes.
-
-**Step 1:** To launch the master node, run the following command on host 1:
 ```commandline
-# Run the master node on host 1 (IP: 172.17.0.3, RANK = 0)
-> python examples/run_multihost.py --rank 0 --world_size 2 --master_ip 172.17.0.3 --master_port=29500 --model_type llama --model_path <PATH-TO-MODEL-FILES>
+> python examples/run_multiprocess.py --world_size 4 --model_type llama --model_path <PATH-TO-MODEL-FILES>
 ```
 
-> **NOTE:** Please make sure the master node can be accessed by all other nodes. The master node also participate in tensor-parallel inference.
+This command will run 4 processes on a single machine, creating a pseudo-distributed environment that leverages tensor parallelism for Llama inference.
 
 _First-Time Setup:_
 
 If this is your first time running the task, the master node will automatically slice the pretrained model weight 
 files. Suppose we have 4 worker nodes (including the master node), the sliced model weight files should be like 
 the following:
-
 
 ```commandline
 > ls <PATH-TO-MODEL-FILES>
@@ -119,6 +107,26 @@ _Subsequent Runs:_
 
 For subsequent runs, the sliced model weight files can be reused. Or you can include the `--split_bin` option 
 to re-split it.
+
+## Run on Multiple Hosts
+Assume we have 2 hosts with IP addresses as follows:
+
+```text
+IP of host 1: 172.17.0.3 (master node)
+IP of host 2: 172.17.0.4 (worker node)
+```
+
+The master node is regarded as the task publisher, who initiates the input prompt and display output
+test stream to users, at the meantime it will slice the pretrained model weight files and serve as a file
+server to send the sliced model weights to other worker nodes.
+
+**Step 1:** To launch the master node, run the following command on host 1:
+```commandline
+# Run the master node on host 1 (IP: 172.17.0.3, RANK = 0)
+> python examples/run_multihost.py --rank 0 --world_size 2 --master_ip 172.17.0.3 --master_port=29500 --model_type llama --model_path <PATH-TO-MODEL-FILES>
+```
+
+> **NOTE:** Please make sure the master node can be accessed by all other nodes. The master node also participate in tensor-parallel inference.
 
 **Step 2**: To launch other worker nodes, use the following command on other hosts (e.g., host 2):
 ```commandline
