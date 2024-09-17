@@ -3,7 +3,6 @@ import argparse
 import torch
 from torch import nn
 from typing import Optional, Union, Tuple
-from mxnet.kvstore import KVStore
 from transformers.models.llama import LlamaPreTrainedModel, LlamaForCausalLM, LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaRMSNorm, LlamaRotaryEmbedding
 from transformers import Cache
@@ -216,17 +215,17 @@ class TPILlamaDecoderLayer(nn.Module):
     def __init__(
         self,
         config: LlamaConfig,
+        rank: int,
         layer_idx: int,
         communicator: CommunicatorBase,
-        rank: int,
         mem_manager: MemoryManager,
         args: argparse.Namespace
     ):
         super().__init__()
+        self.rank = rank
         self.layer_idx = layer_idx
         self.comm = communicator
         self.mem_manager = mem_manager
-        self.slice_num = args.slice_num
 
         head_dim = config.hidden_size // config.num_attention_heads
         if (head_dim * config.num_attention_heads) != config.hidden_size:
@@ -287,7 +286,7 @@ class TPILlamaDecoderLayer(nn.Module):
                 position_embeddings=position_embeddings,
                 **kwargs,
             )
-        hidden_states = self.comm.allreduce(hidden_states, self.slice_num)  # allreduce
+        hidden_states = self.comm.allreduce(hidden_states)  # allreduce
         hidden_states = residual + hidden_states
 
         # fully connected block
@@ -296,7 +295,7 @@ class TPILlamaDecoderLayer(nn.Module):
         with self.mem_manager.wait_and_release(f"mlp.{self.layer_idx}"):
             hidden_states = self.post_attention_layernorm(hidden_states)
             hidden_states = self.mlp(hidden_states)
-        hidden_states = self.comm.allreduce(hidden_states, self.slice_num)  # allreudce
+        hidden_states = self.comm.allreduce(hidden_states)  # allreudce
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -314,19 +313,18 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
     def __init__(
         self,
         config: LlamaConfig,
-        kvstore: KVStore,
-        communicator: CommunicatorBase,
         rank: int,
+        communicator: CommunicatorBase,
         mem_manager: MemoryManager,
         args: argparse.Namespace
     ):
         super().__init__(config)
-        self.comm = communicator
         self.rank = rank
+        self.comm = communicator
         self.mem_manager = mem_manager
         self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         self.layers = nn.ModuleList([
-            TPILlamaDecoderLayer(config, layer_idx, communicator, rank, mem_manager, args)
+            TPILlamaDecoderLayer(config, rank, layer_idx, communicator, mem_manager, args)
             for layer_idx in range(config.num_hidden_layers)]
         )
         self.norm = LlamaRMSNorm(config.hidden_size, eps=config.rms_norm_eps)
@@ -439,7 +437,6 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
     def __init__(
         self,
         config: LlamaConfig,
-        kvstore: KVStore,
         communicator: CommunicatorBase,
         rank: int,
         args: argparse.Namespace
@@ -447,7 +444,7 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         super().__init__(config)
         self.rank = rank
         self.mem_manager = MemoryManager(self, rank, args)
-        self.model = TPILlamaModel(config, kvstore, communicator, rank, self.mem_manager, args)
+        self.model = TPILlamaModel(config, rank, communicator, self.mem_manager, args)
 
     def forward(
         self,

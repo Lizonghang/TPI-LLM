@@ -47,3 +47,23 @@ def connect_with_retry(host, port, rank, retry_interval=0.5, max_retry=10) -> so
             time.sleep(retry_interval)
 
     raise ConnectionRefusedError(f"Failed to connect to {host}:{port} after {max_retry} attempts.")
+
+
+def recv_data_chunk(conn, data_len):
+    """
+    Receives a chunk of data from a socket connection until the specified length is reached.
+
+    Parameters:
+        conn (socket object): The socket connection from which to receive data.
+        data_len (int): The expected length of the data to receive.
+
+    Returns:
+        bytes: The received data.
+    """
+    data = b""
+    while len(data) < data_len:
+        packet = conn.recv(min(4096, data_len - len(data)))
+        if not packet:
+            break
+        data += packet
+    return data

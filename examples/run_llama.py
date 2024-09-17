@@ -1,7 +1,6 @@
 import os
 import logging
 import torch
-from mxnet import nd
 from transformers import AutoTokenizer, TextStreamer
 from tpi_llm import TPILlamaForCausalLM
 from tpi_llm.split import split_pretrained_model
@@ -46,7 +45,7 @@ def adjust_length_to_model(length, max_sequence_length):
     return length
 
 
-def main(kvstore, my_rank, world_size, args):
+def main(my_rank, args):
     # set random seeds for reproducibility
     torch.manual_seed(args.seed)
     if args.use_gpu:
@@ -61,13 +60,13 @@ def main(kvstore, my_rank, world_size, args):
                             f"please download the pretrained model parameters first.")
 
         # initialize communicator for master node
-        comm = CommunicatorMaster(kvstore, args.master_ip, args.broadcast_port, world_size)
+        comm = CommunicatorMaster(args.master_ip, args.master_port, args.world_size)
 
         # split the pretrained model files if not split or forced to split
         if not os.path.exists(split_file_path) or args.split_bin:
             split_pretrained_model(
                 model_path=args.model_path,
-                world_size=world_size,
+                world_size=args.world_size,
                 ratio=args.ratio,
                 save_dir=args.save_dir
             )
@@ -76,14 +75,14 @@ def main(kvstore, my_rank, world_size, args):
         # wait for other nodes to download sliced files
         run_sync_server(args.master_ip, args.file_port, args.model_path, split_file_path)
         # ensure that the file download is executed after the master node binds its file port
-        comm.barrier()
     else:  # for the non-master node
-        comm = CommunicatorClient(kvstore, args.master_ip, args.broadcast_port, my_rank)
-        comm.barrier()
+        comm = CommunicatorClient(args.master_ip, args.master_port, my_rank)
         # download sliced weight files from the master node
         if not os.path.exists(split_file_path) or args.force_download:
             os.makedirs(os.path.join(split_file_path, f"node_{my_rank}"), exist_ok=True)
             download_file(args.master_ip, args.file_port, my_rank, args.model_path, split_file_path)
+
+    comm.barrier()
 
     # load model configurations and set generation length
     model_config = load_model_config(args.model_path)
@@ -93,9 +92,9 @@ def main(kvstore, my_rank, world_size, args):
     args.rank = my_rank
     assert args.memory_window >= 2, \
         "Memory window should be larger than 10."
-    assert model_config.get("num_key_value_heads", 1e9) >= world_size, \
+    assert model_config.get("num_key_value_heads", 1e9) >= args.world_size, \
         "The number of nodes cannot be more than the number of kv heads."
-    logger.info(f"My rank is {my_rank}, totally {world_size} nodes.")
+    logger.info(f"My rank is {my_rank}, totally {args.world_size} nodes.")
 
     try:
         # select model and tokenizer
@@ -121,32 +120,9 @@ def main(kvstore, my_rank, world_size, args):
             add_special_tokens=False,
             return_tensors="pt"
         ).to(args.device)
-        input_len = input_ids.size(1)
-
-        # broadcast input_len to other nodes to init kvstore
-        comm.broadcast(input_len)
-    else:
-        # receive input_len from master node to init kvstore
-        input_len = comm.request()
 
     # load model
-    model = model_class.from_pretrained(
-        args.model_path,
-        kvstore,
-        comm,
-        rank=my_rank,
-        args=args
-    )
-
-    # init kvstore under multi-root setting
-    # if input_len > 1, 0 ~ slice_num for prefilling and slice_num ~ 2 * slice_num for decoding
-    # if input_len = 1, 0 ~ slice_num is shared by prefilling and decoding
-    for slice_idx in range(args.slice_num * (2 if input_len > 1 else 1)):
-        len_ = 1 if input_len > 1 and slice_idx >= args.slice_num else input_len
-        size_, remainder_ = divmod(len_ * model.config.hidden_size, args.slice_num)
-        size_ += int(slice_idx % args.slice_num < remainder_)
-        kvstore.init(str(slice_idx), nd.zeros(size_))
-    comm.barrier()  # make sure kvstore init is complete before push/pull
+    model = model_class.from_pretrained(args.model_path, comm, rank=my_rank, args=args)
 
     # generate output with streaming output
     model.generate(

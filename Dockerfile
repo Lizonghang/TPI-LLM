@@ -18,7 +18,9 @@ RUN apt update && \
           iputils-ping \
           net-tools \
           htop \
-          bc && \
+          bc \
+          tc \
+          iperf && \
     apt clean && \
     rm -rf /var/lib/apt/lists/*
 

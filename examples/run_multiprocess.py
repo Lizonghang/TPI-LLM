@@ -1,5 +1,5 @@
-import os
 import argparse
+import torch.multiprocessing as mp
 from run_llama import main
 
 
@@ -8,9 +8,8 @@ if __name__ == "__main__":
     # necessary arguments
     parser.add_argument("--model_type", default=None, type=str, required=True)
     parser.add_argument("--model_path", default=None, type=str, required=True)
-    parser.add_argument("--rank", default=None, type=int, required=True)
     parser.add_argument("--world_size", default=None, type=int, required=True)
-    parser.add_argument("--master_ip", default=None, type=str, required=True)
+    parser.add_argument("--master_ip", type=str, default="127.0.0.1")
     parser.add_argument("--master_port", type=int, default=29500, help="Communication port.")
     # for weight file synchronization
     parser.add_argument("--file_port", type=int, default=29600, help="File server port.")
@@ -32,5 +31,12 @@ if __name__ == "__main__":
                         help="Memory window size, should be at least 2.")
     args = parser.parse_args()
 
-    # run inference
-    main(args.rank, args)
+    processes = []
+    mp.set_start_method("spawn")
+    for rank in range(args.world_size):
+        p = mp.Process(target=main, args=(rank, args))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()

@@ -3,11 +3,8 @@ import pickle
 import struct
 import logging
 import torch
-import mxnet as mx
-from mxnet import nd
-from mxnet.kvstore import KVStore
 from abc import ABC, abstractmethod
-from .utils import connect_with_retry
+from .utils import connect_with_retry, recv_data_chunk
 
 logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
@@ -22,63 +19,23 @@ class CommunicatorBase(ABC):
     Base class for implementing communication between distributed nodes.
     This class provides the basic functionality of allreduce and acts as an abstract base
     for more specific communicator implementations, such as broadcast, request, and barrier.
-
-    Args:
-        kvstore (KVStore): KVStore used for distributed key-value storage and synchronization.
     """
 
-    def __init__(self, kvstore: KVStore):
-        self._kv = kvstore
+    def __init__(self):
         self._s = None
 
-    def allreduce(self, tensor: torch.Tensor, slice_num: int) -> torch.Tensor:
+    @abstractmethod
+    def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
         """
-        Perform an allreduce operation using KVStore on a PyTorch tensor across distributed nodes,
-        slicing the tensor into a specified number of evenly-sized slices across multiple dimensions.
+        Perform an allreduce operation on a PyTorch tensor across distributed nodes.
 
         Args:
             tensor (torch.Tensor): The tensor to be all-reduced across nodes.
-            slice_num (int): The number of slices to divide the tensor into.
 
         Returns:
             torch.Tensor: The reduced tensor, synchronized across all nodes.
         """
-        # convert PyTorch tensor to a NumPy array and then to an MXNet NDArray
-        tensor_np = tensor.detach().cpu().numpy()
-        tensor_nd = nd.array(tensor_np, ctx=mx.cpu())
-        data_vec = tensor_nd.reshape(-1)
-
-        slice_size, remainder = divmod(tensor_nd.size, slice_num)
-        slices = []
-        start = 0
-
-        # slice the flattened tensor into approximately equal parts
-        for i in range(slice_num):
-            # determine the size of the current slice
-            current_slice_size = slice_size + (1 if i < remainder else 0)
-            end = start + current_slice_size
-
-            # extract the slice
-            slice_nd = data_vec[start:end]
-            slices.append(slice_nd)
-
-            # do push pull for each slice
-            # if input_len > 1, 0 ~ slice_num for prefilling and slice_num ~ 2 * slice_num for decoding
-            # if input_len = 1, 0 ~ slice_num is shared by prefilling and decoding
-            key = str(i + slice_num) if tensor.size(1) == 1 else str(i)
-            self._kv.push(key, slice_nd)
-            nd.waitall()
-            self._kv.pull(key, out=slice_nd)
-            nd.waitall()
-
-            # update the start index for the next slice
-            start = end
-
-        # concatenate all slices and reshape back to the original shape
-        reduced_tensor = nd.concat(*slices, dim=0).reshape(tensor_nd.shape)
-
-        # convert the reduced MXNet NDArray back to a PyTorch tensor
-        return torch.from_numpy(reduced_tensor.asnumpy()).to(tensor.device)
+        pass
 
     @abstractmethod
     def barrier(self):
@@ -101,13 +58,12 @@ class CommunicatorMaster(CommunicatorBase):
     among distributed nodes.
 
     Args:
-        kvstore (KVStore): KVStore used for distributed key-value storage and synchronization.
         host (str): The host IP address for the master node.
         port (int): The port on which the master node listens for client connections.
         world_size (int): The total number of nodes in the distributed system.
     """
-    def __init__(self, kvstore: KVStore, host: str, port: int, world_size: int):
-        super().__init__(kvstore)
+    def __init__(self, host: str, port: int, world_size: int):
+        super().__init__()
         self._world_size = world_size
         self._s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self._s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -128,7 +84,7 @@ class CommunicatorMaster(CommunicatorBase):
         Broadcast data to all other nodes.
 
         Args:
-            data: The data to be broadcast.
+            data: The data to be broadcast, can be any type.
         """
         # collect client connections first
         self._collect_sockets()
@@ -140,8 +96,33 @@ class CommunicatorMaster(CommunicatorBase):
             serialized_data = pickle.dumps(data)
         data_len = struct.pack("i", len(serialized_data))
         for s in self._client_sockets.keys():
-            s.sendall(data_len)  # meta head
-            s.sendall(serialized_data)  # data
+            s.sendall(data_len + serialized_data)  # data
+
+    def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Perform an allreduce operation on a PyTorch tensor across distributed nodes.
+        """
+        # collect client connections first
+        self._collect_sockets()
+
+        all_clients = set(self._client_sockets.keys())
+        received_clients = set()
+        # sum up tensors from all clients
+        while received_clients != all_clients:
+            for s in all_clients:
+                head_len = struct.unpack("i", recv_data_chunk(s, 4))[0]
+                recv_data = recv_data_chunk(s, head_len)
+                assert len(recv_data) == head_len, f"Received {len(recv_data)} bytes, expected {head_len} bytes"
+                assert s not in received_clients, f"Worker {self._client_sockets[s]} has already sent before."
+                received_clients.add(s)
+                tensor += pickle.loads(recv_data)
+
+        # send reduced result to all clients
+        for s in received_clients:
+            serialized_data = pickle.dumps(tensor)
+            head_len = struct.pack("i", len(serialized_data))
+            s.sendall(head_len + serialized_data)
+        return tensor
 
     def barrier(self):
         """
@@ -175,13 +156,12 @@ class CommunicatorClient(CommunicatorBase):
     operations with the master node.
 
     Args:
-        kvstore (KVStore): KVStore used for distributed key-value storage and synchronization.
         host (str): The host IP address of the master node.
         port (int): The port on which the master node is listening.
         rank (int): My rank.
     """
-    def __init__(self, kvstore: KVStore, host: str, port: int, rank: int):
-        super().__init__(kvstore)
+    def __init__(self, host: str, port: int, rank: int):
+        super().__init__()
         self._host = host
         self._port = port
         self._rank = rank
@@ -198,20 +178,32 @@ class CommunicatorClient(CommunicatorBase):
             self._s = connect_with_retry(self._host, self._port, self._rank)
 
         # receive data length from meta info
-        data_len = self._s.recv(4)
-        data_len = struct.unpack("i", data_len)[0]
+        data_len = struct.unpack("i", recv_data_chunk(self._s, 4))[0]
 
         # receive the data in chunks from the master node
-        data = b""
-        while len(data) < data_len:
-            packet = self._s.recv(min(4096, data_len - len(data)))
-            if not packet:
-                break
-            data += packet
+        data = recv_data_chunk(self._s, data_len)
 
         if data_len == 4:  # an integer received
             return struct.unpack("i", data)[0]
         return pickle.loads(data)  # a pickle object received
+
+    def allreduce(self, tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Perform an allreduce operation on a PyTorch tensor across distributed nodes.
+        """
+        # establish a long-term connection, if not already connected
+        if self._s is None:
+            self._s = connect_with_retry(self._host, self._port, self._rank)
+
+        # send a tensor to the master node
+        serialized_data = pickle.dumps(tensor)
+        head_len = struct.pack("i", len(serialized_data))
+        self._s.sendall(head_len + serialized_data)
+
+        # receive the data in chunks from the master node
+        head_len = struct.unpack("i", recv_data_chunk(self._s, 4))[0]
+        data = recv_data_chunk(self._s, head_len)
+        return pickle.loads(data)
 
     def barrier(self):
         """
