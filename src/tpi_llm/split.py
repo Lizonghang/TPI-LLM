@@ -74,11 +74,14 @@ def get_heads_per_node(world_size, ratio, num_heads=None, num_kv_heads=None):
         heads_per_node_ = [int(num_heads_ * r) for r in ratio]
         difference_ = num_heads_ - sum(heads_per_node_)
         for i in range(abs(difference_)):
-            heads_per_node_[i % world_size] += 1 if difference_ > 0 else -1
+            heads_per_node_[-i-1] += 1
         return heads_per_node_
 
-    heads_per_node = _allocate_heads(num_heads) if num_heads is not None else []
     kv_heads_per_node = _allocate_heads(num_kv_heads) if num_kv_heads is not None else []
+    num_key_value_groups, remainder = divmod(num_heads, num_kv_heads)
+    if remainder != 0:
+        raise ValueError("The value of num_heads is not divisible by num_kv_heads.")
+    heads_per_node = [h * num_key_value_groups for h in kv_heads_per_node]
 
     validate_heads_per_node(heads_per_node, num_heads)
     validate_heads_per_node(kv_heads_per_node, num_kv_heads)
@@ -141,7 +144,7 @@ def merge_and_load_weights(sharded_filenames, is_safetensors):
         if is_safetensors:
             sharded_weights = safetensors.torch.load_file(filename)
         else:
-            sharded_weights = torch.load(filename)
+            sharded_weights = torch.load(filename, map_location="cpu")
         merged_weights.update(sharded_weights)
         del sharded_weights
     return merged_weights
@@ -187,7 +190,7 @@ def split_attention_heads(weights, layer_num, heads_per_node, kv_heads_per_node,
         attn_path = os.path.join(node_dir, ATTN_SAVE_PATH.format(l=layer_num))
         state_dict = {
             input_layernorm_key: weights[input_layernorm_key],
-            q_key: q_.clone(), k_key: k_.clone(), v_key: v_.clone(), o_key: o_.clone(),
+            q_key: q_.clone(), k_key: k_.clone(), v_key: v_.clone(), o_key: o_.clone()
         }
         if rotary_emb_key in weights.keys():
             state_dict[rotary_emb_key] = weights[rotary_emb_key]
@@ -213,7 +216,9 @@ def split_mlp(weights, layer_num, heads_per_node, model_path, save_dir="split"):
     down_key = MLP_KEY_TEMPLATE.format(l=layer_num, type="down")
 
     # calculate the dimensions to split the weights according to heads_per_node
-    split_dims = (np.array(heads_per_node) * weights[gate_key].size(0) // sum(heads_per_node)).tolist()
+    split_dims = [weights[gate_key].size(0) // len(heads_per_node)] * len(heads_per_node)
+    for i in range(weights[gate_key].size(0) - sum(split_dims)):
+        split_dims[-i-1] += 1
     assert sum(split_dims) == weights[gate_key].size(0)
 
     # split gate_proj, up_proj, down_proj based on split_dims
@@ -229,9 +234,7 @@ def split_mlp(weights, layer_num, heads_per_node, model_path, save_dir="split"):
         mlp_path = os.path.join(node_dir, MLP_SAVE_PATH.format(l=layer_num))
         torch.save({
             post_attn_layernorm_key: weights[post_attn_layernorm_key],
-            gate_key: gate_.clone(),
-            up_key: up_.clone(),
-            down_key: down_.clone(),
+            gate_key: gate_.clone(), up_key: up_.clone(), down_key: down_.clone()
         }, mlp_path)
 
 
@@ -299,7 +302,7 @@ def split_pretrained_model(model_path, world_size, ratio, save_dir="split"):
         if is_safetensors:
             full_weights = safetensors.torch.load_file(safetensors_file)
         else:
-            full_weights = torch.load(bin_file)
+            full_weights = torch.load(bin_file, map_location="cpu")
     elif os.path.exists(bin_index_file) or os.path.exists(safetensors_index_file):
         # merge sharded files first and then split
         index_file = safetensors_index_file if is_safetensors else bin_index_file

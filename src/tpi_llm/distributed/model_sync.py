@@ -15,7 +15,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def download_file(host: str, port: int, rank: int, save_path: str):
+def download_file(host: str, port: int, rank: int, model_path: str, split_path: str):
     """
     Connect to the file server on the master node to download sliced model parameter files.
 
@@ -23,7 +23,8 @@ def download_file(host: str, port: int, rank: int, save_path: str):
         host (str): The IP address or hostname of the master node.
         port (int): The port number on which the file server is listening.
         rank (int): The rank of the requesting node.
-        save_path (str): The directory where downloaded files will be saved.
+        model_path (str): The directory to save the main model files.
+        split_path (str): The directory to save the split model files.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
@@ -48,7 +49,9 @@ def download_file(host: str, port: int, rank: int, save_path: str):
                 file_size_data = s.recv(8)
                 file_size = struct.unpack("Q", file_size_data)[0]
                 # receive file content
-                with open(os.path.join(save_path, file_name), "wb") as f:
+                save_path_ = os.path.join(model_path, split_path, f"node_{rank}") \
+                    if ".bin" in file_name else model_path
+                with open(os.path.join(save_path_, file_name), "wb") as f:
                     bytes_received = 0
                     while bytes_received < file_size:
                         data = s.recv(min(1024, file_size - bytes_received))

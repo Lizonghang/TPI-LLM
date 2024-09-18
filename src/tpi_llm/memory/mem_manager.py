@@ -1,13 +1,12 @@
 import os
 import re
-import time
+import threading
 import torch
-import asyncio
-import numpy as np
+import torch.nn as nn
 from typing import Tuple, Deque
 from collections import deque
-from memory_profiler import memory_usage
-from concurrent.futures import ThreadPoolExecutor, Future
+from contextlib import contextmanager
+from concurrent.futures import ThreadPoolExecutor, Future, as_completed
 from ..utils import (
     BLOCK_TEMPLATE,
     ATTN_SAVE_PATH,
@@ -16,33 +15,44 @@ from ..utils import (
     OUTPUT_SAVE_PATH,
 )
 
+torch.set_num_threads(8)
+
 
 class MemoryManager:
+    """
+    Manage the loading and unloading of model weights from disk to cpu memory.
+    """
+
     def __init__(self, model, rank, args):
         self._model = model
-        self._device = model.device
+        self._device = model.device  # todo: only cpu tested.
         self._rank = rank
         self._split_dir = os.path.join(args.model_path, args.save_dir, f"node_{rank}")
         self._all_layers = set(model.state_dict().keys())
-        self._all_blocks = ["input"] + [
+        _all_blocks = [
             BLOCK_TEMPLATE.format(l=block_idx, type=block_type)
             for block_idx in range(model.config.num_hidden_layers)
             for block_type in ["self_attn", "mlp"]
-        ] + ["output"]
-        self._loaded_blocks: Deque[str] = deque(maxlen=args.memory_window)
+        ]
+        self._all_blocks = ["input"] + _all_blocks + ["output"] if rank == 0 else _all_blocks
+        self._loaded_blocks: Deque[str] = deque(maxlen=args.memory_window)  # tracks loaded blocks
         self._layers_in_block = {block_key: [] for block_key in self._all_blocks}
-        self._memory_usage_history = np.array([[time.time(), memory_usage()[0]]])
+        self._disabled = args.disable_memory_schedule  # whether to disable memory schedule
+        self._batch_loaded = False
+        self._futures: Deque[Future] = {}
+        self._condition = threading.Condition()
+        self._stop = False  # flag to stop the scheduling thread
+        self._thread = None
 
     def _get_bid_and_btype(self, block_name: str) -> Tuple[int, str]:
         """
-        Extracts the block id and block type from the given block name.
+        Extract the block id and block type from the given block name.
 
         Args:
             block_name (str): The name of the block, following the BLOCK_TEMPLATE pattern.
 
         Returns:
             Tuple[int, str]: A tuple containing the block id (int) and block type (str).
-
         """
         pattern = BLOCK_TEMPLATE.format(type=r'(\w+)', l=r'(\d+)')
         match = re.match(pattern, block_name)
@@ -51,67 +61,124 @@ class MemoryManager:
         else:
             raise ValueError(f"Key '{block_name}' does not match pattern '{pattern}'")
 
-    def _load_block_until_filled(self, block_name: str):
+    def _find_module(self, model, key: str) -> nn.Module:
         """
-        Loads multiple blocks starting from the given block until self._loaded_blocks is full.
+        Find the module corresponding to the given key.
 
         Args:
-            block_name (str): The starting block name to load.
+            model: The model containing the module.
+            key (str): The full key path to the module (e.g., 'model.embed_tokens.weight').
+
+        Returns:
+            The module object if found.
+       """
+        module = model
+        *module_names, param_name = key.split('.')
+        for name in module_names:
+            module = getattr(module, name, None)
+            if module is None:
+                raise ValueError(f"Parameter {key} not found.")
+        return module
+
+    def _load_key(self, block_name: str, key: str, weight: torch.Tensor):
         """
-        # ensure the block_name exists
-        if block_name not in self._all_blocks:
-            raise ValueError("Block name {} is not valid.".format(block_name))
+        Load the weights into the model for a given key.
 
-        # get the starting index of block_name
-        start_idx = self._all_blocks.index(block_name)
+        Args:
+            block_name (str): The name of the block, can be "input", "self_attn", "mlp", or "output".
+            key (str): The key specifying where the weight should be loaded.
+            weight: The weight tensor to load.
+        """
+        if key not in self._all_layers:  # skip if the key is not used in the model
+            return
 
-        # load blocks sequentially until the deque is full
-        for idx in range(start_idx, len(self._all_blocks)):
-            block_name_ = self._all_blocks[idx]
+        *module_names, param_name = key.split('.')
+        module = self._find_module(self._model, key)
+        # register the parameter, note that only float32 is supported on cpu
+        module.register_parameter(
+            param_name,
+            torch.nn.Parameter(weight.float(), requires_grad=False)
+        )
+        # record which layers are in a block
+        if key not in self._layers_in_block[block_name]:
+            self._layers_in_block[block_name].append(key)
 
-            # skip if the block is already loaded
-            if block_name_ in self._loaded_blocks:
-                continue
+    def _load_block(self, block_name: str):
+        """
+        Load the weights for a specific block.
 
-            # append the loaded block name to the deque
-            self._loaded_blocks.append(block_name_)
+        Args:
+            block_name (str): The name of the block to load.
+        """
+        # determine the path to the binary file
+        if block_name == "input":
+            bin_path = os.path.join(self._split_dir, INPUT_SAVE_PATH)
+        elif block_name == "output":
+            bin_path = os.path.join(self._split_dir, OUTPUT_SAVE_PATH)
+        elif "self_attn" in block_name:
+            block_id, _ = self._get_bid_and_btype(block_name)
+            bin_path = os.path.join(self._split_dir, ATTN_SAVE_PATH.format(l=block_id))
+        elif "mlp" in block_name:
+            block_id, _ = self._get_bid_and_btype(block_name)
+            bin_path = os.path.join(self._split_dir, MLP_SAVE_PATH.format(l=block_id))
+        else:
+            raise NotImplementedError(f"Block name {block_name} is not supported.")
 
-            # determine the path to the binary file
-            if block_name_ == "input":
-                bin_path = os.path.join(self._split_dir, INPUT_SAVE_PATH)
-            elif block_name_ == "output":
-                bin_path = os.path.join(self._split_dir, OUTPUT_SAVE_PATH)
-            elif "self_attn" in block_name_:
-                block_id, _ = self._get_bid_and_btype(block_name_)
-                bin_path = os.path.join(self._split_dir, ATTN_SAVE_PATH.format(l=block_id))
-            elif "mlp" in block_name_:
-                block_id, _ = self._get_bid_and_btype(block_name_)
-                bin_path = os.path.join(self._split_dir, MLP_SAVE_PATH.format(l=block_id))
-            else:
-                raise NotImplementedError(f"Block name {block_name} is not supported.")
+        try:
+            # load pretrained weights into memory
+            with torch.no_grad(), open(bin_path, 'rb') as f:
+                pretrained_weights = torch.load(f, map_location=self._device)
 
-            # load pretrained weights into model tensors
-            try:
-                with open(bin_path, 'rb') as f:
-                    pretrained_weights = torch.load(f, map_location=self._device)
+            # use a thread pool to load weights concurrently
+            with ThreadPoolExecutor() as executor:
+                futures = {executor.submit(self._load_key, block_name, k, v): k
+                           for k, v in pretrained_weights.items()}
+                # wait for all nested futures to complete
+                for future in as_completed(futures):
+                    future.result()
 
-                for key, weight in pretrained_weights.items():
-                    if key in self._all_layers:
-                        self._model.state_dict()[key].copy_(weight)
-                        self._layers_in_block[block_name_].append(key)
+            del pretrained_weights
+        except FileNotFoundError:
+            if block_name not in ("input", "output"):
+                raise FileNotFoundError(f"Binary file {bin_path} not found.")
 
-                del pretrained_weights
-            except FileNotFoundError:
-                if block_name_ != "output":
-                    raise FileNotFoundError(f"Binary file {bin_path} not found.")
+    def _daemon_loop(self):
+        """
+        The daemon loop function for loading model weights.
+        """
+        # load blocks
+        block_idx = 0
+        while True:
+            # load the next block
+            block_name = self._all_blocks[block_idx]
+            block_idx = (block_idx + 1) % len(self._all_blocks)
 
-            # stop if the deque is full
-            if len(self._loaded_blocks) == self._loaded_blocks.maxlen:
-                break
+            # wait until there is space available
+            with self._condition:
+                while not self._disabled and len(self._loaded_blocks) >= self._loaded_blocks.maxlen:
+                    self._condition.wait()
+
+            if self._stop:  # exit loop to exit the memory scheduling thread
+                return
+
+            # load the blocks asynchronously
+            with ThreadPoolExecutor() as executor:
+                future = executor.submit(self._load_block, block_name)
+
+            # add the future to the tracking list
+            with self._condition:
+                self._futures[block_name] = future
+                self._loaded_blocks.append(block_name)
+                self._condition.notify_all()
+
+            # exist the thread at the end of the first epoch if memory schedule is disabled
+            if self._disabled and block_idx == 0:
+                self._batch_loaded = True
+                return
 
     def _release_block(self, block_name: str):
         """
-        Releases the memory of the tensors associated with the specified block.
+        Delete used weights in a given block to save memory.
 
         Args:
             block_name (str): The name of the block to release.
@@ -119,75 +186,101 @@ class MemoryManager:
         if block_name not in self._layers_in_block:
             raise KeyError(f"Block name '{block_name}' not found in _layers_in_block.")
 
+        # a block may contain multiple keys, delete them
         for layer_key in self._layers_in_block[block_name]:
-            tensor_ = self._model.state_dict()[layer_key]
-
-            # release the tensor memory depending on its device type
-            if tensor_.device.type == 'cuda':
+            module = self._find_module(self._model, layer_key)
+            *module_names, param_name = layer_key.split('.')
+            if module._parameters[param_name].device.type == "cuda":
+                # clear data in cuda memory, todo: this feature is not tested
                 with torch.no_grad():
-                    tensor_.data = None  # de-referencing gpu memory
+                    module._parameters[param_name].data = None
+                torch.cuda.empty_cache()
             else:
-                del tensor_  # deleting cpu tensor
+                # clear data in cpu memory
+                del module._parameters[param_name]
 
-        # force to clear gpu cache
-        torch.cuda.empty_cache()
-
-    def track(self, block_name: str, async_op: bool = False) -> Future:
+    def release_before(self, block_name: str):
         """
-        Starts a background task to schedule the loading and releasing of blocks.
+        Release all used blocks before this block.
 
         Args:
-            block_name (str): The name of the block currently processing.
-            async_op (bool, optional): Whether the task is asynchronous or not. Defaults to False.
-
-        Returns:
-            Future: A concurrent.futures.Future object representing the asynchronous task.
-                Use self.wait() to wait for the background task to complete.
+            block_name (str): The name of the block before which used blocks are deleted.
         """
-
-        def _track_func(block_name_: str):
-            if block_name_ not in self._all_blocks:
-                return
-
-            # release all blocks before this block
-            while self._loaded_blocks:
+        with self._condition:
+            while len(self._loaded_blocks) > 0:
                 current_block = self._loaded_blocks[0]
-                if (block_name_ == "input" or
-                        self._all_blocks.index(current_block) < self._all_blocks.index(block_name_)):
-                    self._release_block(self._loaded_blocks.popleft())
+                if block_name == self._all_blocks[0]:
+                    # clear all loaded blocks except the current one
+                    if current_block == block_name:
+                        break
+                    else:
+                        self._release_block(self._loaded_blocks.popleft())
                 else:
-                    break
+                    # clear used blocks before this one
+                    if self._all_blocks.index(current_block) < self._all_blocks.index(block_name):
+                        self._release_block(self._loaded_blocks.popleft())
+                    else:
+                        break
+            self._condition.notify_all()
 
-            # load the block and subsequent blocks until the deque is full
-            self._load_block_until_filled(block_name)
-
-            # record memory usage
-            current_memory_usage = np.array([[time.time(), memory_usage()[0]]])
-            self._memory_usage_history = np.vstack((self._memory_usage_history, current_memory_usage))
-
-        # Create a thread pool executor and run track function in the background using a thread pool
-        executor = ThreadPoolExecutor(max_workers=1)
-        loop = asyncio.get_event_loop()
-        track_thread = loop.run_in_executor(executor, _track_func, block_name)
-        if not async_op: self.wait(track_thread)
-        return track_thread
-
-    def wait(self, thread: Future) -> any:
+    def start(self) -> Future:
         """
-        Waits for the result of the given background task.
-
-        Args:
-            thread (Future): A concurrent.futures.Future object representing the background task.
+        Start the memory scheduler in the background.
 
         Returns:
-            any: The result of the background task.
+            Future: The future object representing the memory scheduler thread.
         """
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(thread)
-        return result
+        if self._thread is None:
+            executor = ThreadPoolExecutor()
+            self._thread = executor.submit(self._daemon_loop)
 
-    @property
-    def memory_history(self):
-        log_ts_str = ', '.join([str(t) for t in self._memory_usage_history[:, 0].tolist()])
-        log_mem_str = ', '.join([str(m) for m in self._memory_usage_history[:, 1].tolist()])
-        return log_ts_str, log_mem_str
+    def wait(self, block_name: str):
+        """
+        Wait for the block to complete.
+
+        Args:
+            block_name (str): The name of the block to wait for.
+        """
+        if not self._batch_loaded:
+            with self._condition:
+                while block_name not in self._futures:
+                    self._condition.wait()
+                while not self._futures[block_name].done():
+                    self._condition.wait()
+
+            with self._condition:
+                del self._futures[block_name]
+                self._condition.notify_all()
+
+    def release(self, block_name: str):
+        """
+        Delete the block to save memory.
+
+        Args:
+            block_name (str): The name of the block to delete.
+        """
+        if not self._disabled:
+            self.release_before(block_name)
+
+    @contextmanager
+    def wait_and_release(self, block_name: str):
+        """
+        Context manager that waits for a block to load, executes the context, and releases the block.
+
+        Args:
+            block_name (str): The name of the block to wait and release.
+        """
+        self.wait(block_name)
+        try:
+            yield  # execution of statements happens here
+        finally:
+            self.release(block_name)
+
+    def stop(self):
+        """
+        Stop the memory scheduler thread in a graceful manner.
+        """
+        with self._condition:
+            self._stop = True
+            self._loaded_blocks.clear()
+            self._condition.notify_all()
