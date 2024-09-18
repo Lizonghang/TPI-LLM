@@ -111,7 +111,7 @@ def main(my_rank, args, dist=None):
     tokenizer, streamer = None, None
     input_ids = ""
     if my_rank == 0:
-        tokenizer = tokenizer_class.from_pretrained(args.model_path)
+        tokenizer = tokenizer_class.from_pretrained(args.model_path, trust_remote_code=True)
         if tokenizer.pad_token is None:
             tokenizer.pad_token = tokenizer.eos_token  # set pad token if not set
 
