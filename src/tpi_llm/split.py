@@ -7,6 +7,7 @@ import numpy as np
 import safetensors.torch
 from tqdm import tqdm
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from .modeling_utils import load_model_config
 from .utils import (
     WEIGHTS_NAME,
@@ -314,10 +315,18 @@ def split_pretrained_model(model_path, world_size, ratio, save_dir="split"):
     else:
         raise NotImplementedError("Current weight files are not supported.")
 
-    # save input and output layer on the master node
-    save_input_and_output_weights(full_weights, model_path, save_dir)
-    # split and save attention and mlp layers on each node
-    for layer_num in tqdm(range(num_hidden_layers), desc="Slicing layer", leave=False):
+    def _process_layer(layer_num):
         split_attention_heads(
             full_weights, layer_num, heads_per_node, kv_heads_per_node, head_dim, model_path, save_dir)
         split_mlp(full_weights, layer_num, heads_per_node, model_path, save_dir)
+
+    # save input and output layer on the master node
+    save_input_and_output_weights(full_weights, model_path, save_dir)
+    with ThreadPoolExecutor(8) as executor:
+        futures = [
+            executor.submit(_process_layer, layer_num)
+            for layer_num in range(num_hidden_layers)
+        ]
+        with tqdm(total=num_hidden_layers, desc="Slicing layer", leave=False) as pbar:
+            for _ in as_completed(futures):
+                pbar.update(1)  # update progress when a thread completes
