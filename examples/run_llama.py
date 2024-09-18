@@ -78,15 +78,15 @@ def main(my_rank, args, dist=None):
 
         # wait for other nodes to download sliced files
         run_sync_server(args.master_ip, args.file_port, args.model_path, split_file_path)
-        # ensure that the file download is executed after the master node binds its file port
+        # ensure the file download is executed after the master node binds its file port
+        comm.barrier()
     else:  # for the non-master node
         comm = dist or CommunicatorClient(args.master_ip, args.master_port, my_rank)
+        comm.barrier()
         # download sliced weight files from the master node
         if not os.path.exists(split_file_path) or args.force_download:
             os.makedirs(os.path.join(split_file_path, f"node_{my_rank}"), exist_ok=True)
             download_file(args.master_ip, args.file_port, my_rank, args.model_path, split_file_path)
-
-    comm.barrier()
 
     # load model configurations and set generation length
     model_config = load_model_config(args.model_path)
