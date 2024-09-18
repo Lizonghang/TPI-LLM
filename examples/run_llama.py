@@ -73,6 +73,9 @@ def main(my_rank, args, dist=None):
             )
             logger.info(f"All weights are split and saved to {split_file_path}.")
 
+        assert len(os.listdir(split_file_path)) == args.world_size, \
+            f"We have {len(os.listdir(split_file_path))} weight slices but {args.world_size} nodes."
+
         # wait for other nodes to download sliced files
         run_sync_server(args.master_ip, args.file_port, args.model_path, split_file_path)
         # ensure that the file download is executed after the master node binds its file port
