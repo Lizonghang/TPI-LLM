@@ -110,6 +110,22 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
 
+class TPILinear(nn.Linear):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    def reset_parameters(self) -> None:
+        pass
+
+
+class TPIEmbedding(nn.Embedding):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+
+    def reset_parameters(self) -> None:
+        pass
+
+
 class TPILlamaAttention(nn.Module):
 
     def __init__(
@@ -133,10 +149,10 @@ class TPILlamaAttention(nn.Module):
             (f"The value of num_heads ({num_heads}) must be divisible by "
              f"num_key_value_heads ({num_kv_heads}).")
 
-        self.q_proj = nn.Linear(config.hidden_size, num_heads * head_dim, bias=config.attention_bias)
-        self.k_proj = nn.Linear(config.hidden_size, num_kv_heads * head_dim, bias=config.attention_bias)
-        self.v_proj = nn.Linear(config.hidden_size, num_kv_heads * head_dim, bias=config.attention_bias)
-        self.o_proj = nn.Linear(num_heads * head_dim, config.hidden_size, bias=config.attention_bias)
+        self.q_proj = TPILinear(config.hidden_size, num_heads * head_dim, bias=config.attention_bias)
+        self.k_proj = TPILinear(config.hidden_size, num_kv_heads * head_dim, bias=config.attention_bias)
+        self.v_proj = TPILinear(config.hidden_size, num_kv_heads * head_dim, bias=config.attention_bias)
+        self.o_proj = TPILinear(num_heads * head_dim, config.hidden_size, bias=config.attention_bias)
 
     def forward(
         self,
@@ -201,9 +217,9 @@ class TPILlamaMLP(nn.Module):
 
     def __init__(self, config: LlamaConfig, split_dim: int):
         super().__init__()
-        self.gate_proj = nn.Linear(config.hidden_size, split_dim, bias=config.mlp_bias)
-        self.up_proj = nn.Linear(config.hidden_size, split_dim, bias=config.mlp_bias)
-        self.down_proj = nn.Linear(split_dim, config.hidden_size, bias=config.mlp_bias)
+        self.gate_proj = TPILinear(config.hidden_size, split_dim, bias=config.mlp_bias)
+        self.up_proj = TPILinear(config.hidden_size, split_dim, bias=config.mlp_bias)
+        self.down_proj = TPILinear(split_dim, config.hidden_size, bias=config.mlp_bias)
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, x):
@@ -322,7 +338,7 @@ class TPILlamaModel(TPILlamaPreTrainedModel):
         self.rank = rank
         self.comm = communicator
         self.mem_manager = mem_manager
-        self.embed_tokens = nn.Embedding(config.vocab_size, config.hidden_size, config.pad_token_id)
+        self.embed_tokens = TPIEmbedding(config.vocab_size, config.hidden_size, config.pad_token_id)
         self.layers = nn.ModuleList([
             TPILlamaDecoderLayer(config, rank, layer_idx, communicator, mem_manager, args)
             for layer_idx in range(config.num_hidden_layers)]
