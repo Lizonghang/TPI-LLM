@@ -111,19 +111,33 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
 
 
 class TPILinear(nn.Linear):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
-    def reset_parameters(self) -> None:
-        pass
+    def __init__(self, in_features: int, out_features: int) -> None:
+        nn.Module.__init__(self)
+        self.in_features = in_features
+        self.out_features = out_features
+        self.register_parameter("weight", None)
+        self.register_parameter("bias", None)
 
 
 class TPIEmbedding(nn.Embedding):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
-
-    def reset_parameters(self) -> None:
-        pass
+    def __init__(self, num_embeddings: int, embedding_dim: int, padding_idx: Optional[int] = None,
+                 max_norm: Optional[float] = None, norm_type: float = 2., scale_grad_by_freq: bool = False,
+                 sparse: bool = False) -> None:
+        nn.Module.__init__(self)
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        if padding_idx is not None:
+            if padding_idx > 0:
+                assert padding_idx < self.num_embeddings, 'Padding_idx must be within num_embeddings'
+            elif padding_idx < 0:
+                assert padding_idx >= -self.num_embeddings, 'Padding_idx must be within num_embeddings'
+                padding_idx = self.num_embeddings + padding_idx
+        self.padding_idx = padding_idx
+        self.max_norm = max_norm
+        self.norm_type = norm_type
+        self.scale_grad_by_freq = scale_grad_by_freq
+        self.register_parameter("weight", None)
+        self.sparse = sparse
 
 
 class TPILlamaAttention(nn.Module):
