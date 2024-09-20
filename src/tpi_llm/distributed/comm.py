@@ -1,11 +1,9 @@
-import threading
 import socket
 import pickle
 import struct
 import logging
 import torch
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from .utils import connect_with_retry, recv_data_chunk
 
 logging.basicConfig(
@@ -110,29 +108,19 @@ class CommunicatorMaster(CommunicatorBase):
         """
         # collect client connections first
         self._collect_sockets()
-        tensor_lock = threading.Lock()
-
-        def _handle_socket(s):
-            try:
-                head_len = struct.unpack("i", recv_data_chunk(s, 4))[0]
-                recv_data = recv_data_chunk(s, head_len)
-
-                assert len(recv_data) == head_len, \
-                    f"Received {len(recv_data)} bytes, expected {head_len} bytes"
-
-                recv_tensor = pickle.loads(recv_data)
-                with tensor_lock:
-                    tensor.add_(recv_tensor)
-            except Exception as e:
-                logger.info(f"Error handling node {self._client_sockets[s]}: {e}.")
 
         all_clients = set(self._client_sockets.keys())
-        with ThreadPoolExecutor(max_workers=8) as executor:
-            futures = [
-                executor.submit(_handle_socket, s) for s in all_clients
-            ]
-            for _ in as_completed(futures):
-                pass
+        received_clients = set()
+        # sum up tensors from all clients
+        while received_clients != all_clients:
+            for s in all_clients:
+                head_len = struct.unpack("i", recv_data_chunk(s, 4))[0]
+                recv_data = recv_data_chunk(s, head_len)
+                assert len(recv_data) == head_len, f"Received {len(recv_data)} bytes, expected {head_len} bytes"
+                assert s not in received_clients, f"Worker {self._client_sockets[s]} has already sent before."
+                received_clients.add(s)
+                recv_tensor = pickle.loads(recv_data)
+                tensor.add_(recv_tensor)
 
         # send reduced result to all clients
         serialized_data = pickle.dumps(tensor)
