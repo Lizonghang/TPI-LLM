@@ -115,8 +115,8 @@ class TPILinear(nn.Linear):
         nn.Module.__init__(self)
         self.in_features = in_features
         self.out_features = out_features
-        self.register_parameter("weight", None)
-        self.register_parameter("bias", None)
+        if not bias:
+            self.bias = None
 
 
 class TPIEmbedding(nn.Embedding):
@@ -136,7 +136,6 @@ class TPIEmbedding(nn.Embedding):
         self.max_norm = max_norm
         self.norm_type = norm_type
         self.scale_grad_by_freq = scale_grad_by_freq
-        self.register_parameter("weight", None)
         self.sparse = sparse
 
 
@@ -474,10 +473,12 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         rank: int,
         args: argparse.Namespace
     ):
-        super().__init__(config)
+        TPILlamaPreTrainedModel.__init__(self, config)
         self.rank = rank
+        self.vocab_size = config.vocab_size
         self.mem_manager = MemoryManager(self, rank, args)
         self.model = TPILlamaModel(config, rank, communicator, self.mem_manager, args)
+        self.lm_head = TPILinear(config.hidden_size, config.vocab_size, bias=False)
 
     def forward(
         self,
@@ -535,7 +536,7 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
 
         # master node returns output logits, past kv cache, and other info if needed.
         logits = self.lm_head(outputs[0]).float()
-        self.mem_manager.release("output")
+        self.mem_manager.release_before("output")
 
         if not return_dict:
             return (logits,) + outputs[1:]

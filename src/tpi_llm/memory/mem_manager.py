@@ -25,7 +25,7 @@ class MemoryManager:
 
     def __init__(self, model, rank, args):
         self._model = model
-        self._device = model.device  # todo: only cpu tested.
+        self._device = args.device
         self._rank = rank
         self._split_dir = os.path.join(args.model_path, args.save_dir, f"node_{rank}")
         self._all_layers = set(model.state_dict().keys())
@@ -89,11 +89,11 @@ class MemoryManager:
             key (str): The key specifying where the weight should be loaded.
             weight: The weight tensor to load.
         """
-        if key not in self._all_layers:  # skip if the key is not used in the model
-            return
-
         *module_names, param_name = key.split('.')
-        module = self._find_module(self._model, key)
+        try:
+            module = self._find_module(self._model, key)
+        except ValueError:  # key not exist in model parameters
+            return
         # register the parameter, note that only float32 is supported on cpu
         module.register_parameter(
             param_name,
@@ -206,6 +206,9 @@ class MemoryManager:
         Args:
             block_name (str): The name of the block before which used blocks are deleted.
         """
+        if self._disabled:
+            return
+
         with self._condition:
             while len(self._loaded_blocks) > 0:
                 current_block = self._loaded_blocks[0]
@@ -252,16 +255,6 @@ class MemoryManager:
                 del self._futures[block_name]
                 self._condition.notify_all()
 
-    def release(self, block_name: str):
-        """
-        Delete the block to save memory.
-
-        Args:
-            block_name (str): The name of the block to delete.
-        """
-        if not self._disabled:
-            self.release_before(block_name)
-
     @contextmanager
     def wait_and_release(self, block_name: str):
         """
@@ -274,7 +267,7 @@ class MemoryManager:
         try:
             yield  # execution of statements happens here
         finally:
-            self.release(block_name)
+            self.release_before(block_name)
 
     def stop(self):
         """
