@@ -107,6 +107,9 @@ def main(my_rank, args, dist=None):
     except KeyError:
         raise KeyError(f"Unsupported model type: {args.model_type}")
 
+    # load model
+    model = model_class.from_pretrained(args.model_path, comm, rank=my_rank, args=args)
+
     # the master node initializes tokenizer and encodes user prompt
     tokenizer, streamer = None, None
     input_ids = ""
@@ -124,9 +127,6 @@ def main(my_rank, args, dist=None):
             add_special_tokens=False,
             return_tensors="pt"
         ).to(args.device)
-
-    # load model
-    model = model_class.from_pretrained(args.model_path, comm, rank=my_rank, args=args)
 
     # generate output with streaming output
     model.generate(
