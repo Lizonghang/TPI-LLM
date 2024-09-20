@@ -28,7 +28,6 @@ class MemoryManager:
         self._device = args.device
         self._rank = rank
         self._split_dir = os.path.join(args.model_path, args.save_dir, f"node_{rank}")
-        self._all_layers = set(model.state_dict().keys())
         _all_blocks = [
             BLOCK_TEMPLATE.format(l=block_idx, type=block_type)
             for block_idx in range(model.config.num_hidden_layers)
