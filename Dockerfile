@@ -40,12 +40,8 @@ RUN conda install -y python=3.9 && \
 WORKDIR /root
 RUN git clone https://github.com/Lizonghang/TPI-LLM && \
     cd /root/TPI-LLM && \
-    git checkout tpi-mx && \
     pip install --no-cache-dir -r requirements.txt
 ENV PYTHONPATH /root/TPI-LLM/src:$PYTHONPATH
-
-# Install MXNET (optional)
-RUN pip install --no-cache-dir mxnet==1.9.1
 
 WORKDIR /root/TPI-LLM
 CMD ["bash", "-c", "git pull origin tpi-mx && /bin/bash"]
