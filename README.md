@@ -1,35 +1,25 @@
-# TPI-LLM: High-Performance Tensor Parallelism Inference System for Edge LLM Services.
+# TPI-LLM: Serving 70b-scale LLMs Efficiently on Low-resource Edge Devices
 TPI-LLM (Tensor Parallelism Inference for Large Language Models) is a LLM service system designed to bring LLM 
-functions to resource-constrained edge networks. While cloud LLM services have achieved great success, privacy 
+functions to low-resource edge devices. While cloud LLM services have achieved great success, privacy 
 concerns arise and users do not want their conversations uploaded to the cloud as these conversations could 
 involve sensitive personal information.
 
 Our TPI-LLM system addresses the privacy issue by enabling LLM inference on edge devices with limited resources. 
 The system leverages multiple edge devices to perform inference through tensor parallelism, combined with 
-sophisticated memory window scheduling techniques to minimize memory usage. Currently, TPI-LLM can run the 
-full-precision Llama-3.1-8B model on 2 laptops with 8GB of RAM. In the future, we will introduce more techniques 
-to speed up LLM inference.
+a sliding window memory scheduler to minimize memory usage. Currently, TPI-LLM can run Yi-34B in
+full precision on 4 laptops with 5GB of memory on each laptop, and run Llama 2-70B on 8 devices 
+with 3GB of memory on each device. Furthermore, TPI-LLM has demonstrated over 80% less TTFT and token latency
+compared to Accelerate and over 90% compared to Transformers.
 
-# Updates
-* 2024/08/20: Add support for multi-host tensor parallelism.
-* 2024/08/22: Add support for Llama 2, Llama 3 and Llama 3.1.
-* 2024/08/26: Implement a file server to synchronize sliced model files to other nodes.
-* 2024/09/07: Add support for deamon memory scheduling, use `--disable_memory_schedule` to disable this feature.
+In the future, more acceleration techniques and LLM models will be supported.
 
 # Installation
 ## Use the Source Code
-1. Clone the repository:
-```commandline
-> git clone https://github.com/Lizonghang/TPI-LLM
-> cd TPI-LLM
-> git checkout tpi-mx
-```
+1. Clone this repo and enter the project folder.
 
 2. Add `PYTHONPATH` to `.bashrc`:
 ```commandline
 > vim ~/.bashrc
-
-# Set PYTHONPATH to the TPI-LLM/src folder
 export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 ```
 
@@ -41,14 +31,16 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 ```
 
 ## Using Pre-built Docker Image
-We have provided Docker images for TPI-LLM, available on [Docker Hub](https://hub.docker.com/repository/docker/lizonghango00o1/tpi-llm/general). 
+We provide Docker images for TPI-LLM, available on [Docker Hub](https://hub.docker.com/repository/docker/lizonghango00o1/tpi-llm/general). 
 This is the easiest way to get started, as it includes all dependencies pre-installed.
 
-```commandline
-> docker run -dit --name master lizonghango00o1/tpi-llm:1.0.3.mx
-```
+[//]: # (```commandline)
 
-If this is a master node, use `docker cp <HOST_MODEL_PATH> master:/root/TPI-LLM/` to copy the pretrained model files
+[//]: # (> docker run -dit --name master lizonghango00o1/tpi-llm:1.0.3.mx)
+
+[//]: # (```)
+
+If the container is a master node, use `docker cp <HOST_MODEL_PATH> master:/root/TPI-LLM/` to copy the pretrained model files
 to the container of the master node.
 
 ## Build from Dockerfile
@@ -69,6 +61,9 @@ To get started, you’ll need to download the pretrained model weights from **Hu
 - **Llama 2 series**, for example, [Meta/Llama-2-7b-hf](https://huggingface.co/meta-llama/Llama-2-7b-hf)
 - **Llama 3 series**, for example, [Meta/Llama-3-8b](https://huggingface.co/meta-llama/Meta-Llama-3-8B/tree/main)
 - **Llama 3.1 series**, for example, [Meta/Llama-3.1-8b-Instruct](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B-Instruct)
+- **01 AI Yi series**, for example, [chargoddard/Yi-34B-Llama](https://huggingface.co/chargoddard/Yi-34B-Llama)
+
+Please make sure that the downloaded weight files conform to the HuggingFace format.
 
 After downloading, save the model files in a directory of your choice, which we’ll refer to as `<PATH-TO-MODEL-FILES>`.
 
@@ -160,3 +155,6 @@ Below is a list of these options:
 | `--disable_memory_schedule` | `False`   | `bool`  | Set to True to disable memory window scheduling, this may lead to higher speed.                      |
 | `--memory_window`           | `2`       | `int`   | Size of the memory window used during inference. Should be at least 2.                               |
 | `--torch_dist`              | `False`   | `bool`  | Whether to use torch.distributed.                                                                    |
+
+# Cite Us
+Upcoming, the paper is under review.
