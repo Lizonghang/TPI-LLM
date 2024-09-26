@@ -32,13 +32,7 @@ export PYTHONPATH=<PATH-TO-TPI-LLM>/src
 
 ## Using Pre-built Docker Image
 We provide Docker images for TPI-LLM, available on [Docker Hub](https://hub.docker.com/repository/docker/lizonghango00o1/tpi-llm/general). 
-This is the easiest way to get started, as it includes all dependencies pre-installed.
-
-[//]: # (```commandline)
-
-[//]: # (> docker run -dit --name master lizonghango00o1/tpi-llm:1.0.3.mx)
-
-[//]: # (```)
+This is the easiest way to get started, but the container may slow down inference speed.
 
 If the container is a master node, use `docker cp <HOST_MODEL_PATH> master:/root/TPI-LLM/` to copy the pretrained model files
 to the container of the master node.
