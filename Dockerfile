@@ -12,6 +12,7 @@ RUN apt update && \
           wget \
           curl \
           git \
+          git-lfs \
           apt-transport-https \
           openssh-client \
           openssh-server \
@@ -19,7 +20,7 @@ RUN apt update && \
           net-tools \
           htop \
           bc \
-          tc \
+          iproute2 \
           iperf && \
     apt clean && \
     rm -rf /var/lib/apt/lists/*
@@ -38,10 +39,11 @@ RUN conda install -y python=3.9 && \
 
 # Clone repo from github and install required packages
 WORKDIR /root
-RUN git clone https://github.com/Lizonghang/TPI-LLM && \
+RUN git lfs install && \
+    git clone https://github.com/Lizonghang/TPI-LLM && \
     cd /root/TPI-LLM && \
     pip install --no-cache-dir -r requirements.txt
 ENV PYTHONPATH /root/TPI-LLM/src:$PYTHONPATH
 
 WORKDIR /root/TPI-LLM
-CMD ["bash", "-c", "git pull origin tpi-mx && /bin/bash"]
+CMD ["/bin/bash"]
