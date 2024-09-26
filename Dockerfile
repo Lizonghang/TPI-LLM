@@ -12,7 +12,6 @@ RUN apt update && \
           wget \
           curl \
           git \
-          git-lfs \
           apt-transport-https \
           openssh-client \
           openssh-server \
