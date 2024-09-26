@@ -473,7 +473,7 @@ class TPILlamaForCausalLM(LlamaForCausalLM, TPILlamaPreTrainedModel):
         rank: int,
         args: argparse.Namespace
     ):
-        TPILlamaPreTrainedModel.__init__(self, config)
+        super(TPILlamaPreTrainedModel, self).__init__(config)
         self.rank = rank
         self.vocab_size = config.vocab_size
         self.mem_manager = MemoryManager(self, rank, args)
