@@ -65,21 +65,21 @@ To get started, you’ll need to download the pretrained model weights from **Hu
 
 Please make sure that the downloaded weight files conform to the HuggingFace format.
 
-After downloading, save the model files in a directory of your choice, which we’ll refer to as `<PATH-TO-MODEL-FILES>`.
+After downloading, save the model files in a directory of your choice, which we’ll refer to as `/root/TPI-LLM/pretrained_models/Llama-2-1.1b-ft`.
 
 ## Run on Your Laptop
 Run the example script for a trial:
 
 ```commandline
-> python examples/run_multiprocess.py --world_size 4 --model_type llama --model_path <PATH-TO-MODEL-FILES>
+> python examples/run_multiprocess.py --world_size 4 --model_type llama --model_path /root/TPI-LLM/pretrained_models/Llama-2-1.1b-ft --prompt "how are you?" --length 20 --memory_window 4
 ```
 
 This command will run 4 processes on a single machine, creating a pseudo-distributed environment that leverages tensor parallelism for Llama inference.
 
 _First-Time Setup:_
 
-If this is your first time running the task, the master node will automatically slice the pretrained model weight 
-files. Suppose we have 4 worker nodes (including the master node), the sliced model weight files should be like 
+If this is your first time running the task, the master node will automatically slice the pretrained weight 
+files. Suppose we have 4 worker nodes (including the master node), the sliced weight files should be like 
 the following:
 
 ```commandline
@@ -104,36 +104,32 @@ For subsequent runs, the sliced model weight files can be reused. Or you can inc
 to re-split it.
 
 ## Run on Multiple Hosts
-Assume we have 2 hosts with IP addresses as follows:
+Assume we have 2 laptops with IP addresses as follows:
 
 ```text
-IP of host 1: 172.17.0.3 (master node)
-IP of host 2: 172.17.0.4 (worker node)
+IP of host 1: 192.168.2.1 (master node)
+IP of host 2: 192.168.2.2 (worker node)
 ```
 
-The master node is regarded as the task publisher, who initiates the input prompt and display output
-test stream to users, at the meantime it will slice the pretrained model weight files and serve as a file
-server to send the sliced model weights to other worker nodes.
+The master node is regarded as the task publisher, who initiates the prompt and display generated text to users, 
+it also slices the pretrained weight files and serve as a file server to distribute the sliced files to other worker nodes.
 
-**Step 1:** To launch the master node, run the following command on host 1:
+**Step 1:** To launch the master node, run the following command on laptop 1:
 ```commandline
-# Run the master node on host 1 (IP: 172.17.0.3, RANK = 0)
-> python examples/run_multihost.py --rank 0 --world_size 2 --master_ip 172.17.0.3 --master_port=29500 --model_type llama --model_path <PATH-TO-MODEL-FILES>
+# Run the master node on laptop 1 (IP: 192.168.2.1, RANK = 0)
+> python examples/run_multihost.py --rank 0 --world_size 2 --master_ip 192.168.2.1 --master_port=29500 --model_type llama --model_path /root/TPI-LLM/pretrained_models/Llama-2-1.1b-ft --prompt "how are you?" --length 20 --memory_window 4
 ```
 
-> **NOTE:** Please make sure the master node can be accessed by all other nodes. The master node also participate in tensor-parallel inference.
+> **NOTE:** Please make sure the master node can be connected by all other nodes. The master node also participate in tensor-parallel inference.
 
-**Step 2**: To launch other worker nodes, use the following command on other hosts (e.g., host 2):
+**Step 2**: To launch other worker nodes, use the following command on other laptops (e.g., laptop 2):
 ```commandline
-# Run the worker node on host 2 (IP: 172.17.0.4, RANK > 0)
-> python examples/run_multihost.py --rank 1 --world_size 2 --master_ip 172.17.0.3 --master_port=29500 --model_type llama --model_path <PATH-TO-MODEL-FILES>
+# Run the worker node on host 2 (IP: 192.168.2.2, RANK = 1)
+> python examples/run_multihost.py --rank 1 --world_size 2 --master_ip 192.168.2.1 --master_port=29500 --model_type llama --model_path /root/TPI-LLM/pretrained_models/sync --memory_window 4
 ```
 
-The worker nodes will automatically download their model weight slices from the master node. If you have downloaded
-the slices before, you can use the `--force_download` option to force a re-download.
-
-## Run on Klonet
-Coming soon.
+The worker nodes will automatically download their weight files from the master node. If you have downloaded
+the files before, you can use the option `--force_download` to force a re-download.
 
 ## Other Arguments
 TPI-LLM provides several optional parameters that you can customize to control various aspects of the inference process. 
