@@ -1,4 +1,4 @@
 torch
-transformers
+transformers==4.44.0
 sentencepiece
 protobuf
