@@ -9,9 +9,26 @@ The system leverages multiple edge devices to perform inference through tensor p
 a sliding window memory scheduler to minimize memory usage. Currently, TPI-LLM can run Yi-34B in
 full precision on 4 laptops with 5GB of memory on each laptop, and run Llama 2-70B on 8 devices 
 with 3GB of memory on each device. Furthermore, TPI-LLM has demonstrated over 80% less TTFT and token latency
-compared to Accelerate and over 90% compared to Transformers.
+compared to [Accelerate](https://huggingface.co/docs/accelerate/en/usage_guides/big_modeling), 
+over 90% compared to [Transformers](https://github.com/huggingface/transformers) and 
+[Galaxy](https://github.com/ysyisyourbrother/Galaxy-LM), and 50\%-70\% compared to 
+[llama.cpp](https://github.com/ggerganov/llama.cpp) on larger models (>13B).
 
-In the future, more acceleration techniques and LLM models will be supported.
+| **Model (FP32)** | **Transformers** | **Accelerate** | **llama.cpp (INT4)** | **llama.cpp (INT8)** | **Transformers (with our MS)** | **TPI-LLM (Klonet, 8 devices, wire connected)** | **TPI-LLM (Home, 4 laptops, wireless connected)** |
+|------------------|------------------|----------------|----------------------|----------------------|--------------------------------|-------------------------------------------------|---------------------------------------------------|
+| **Llama 2-3B**   | 30 s/token       | 16 s/token     | **0.05** s/token     | 0.07 s/token         | 3 s/token                      | 2 s/token                                       | 2 s/token                                         |
+| **Llama 2-7B**   | 56 s/token       | 26 s/token     | **0.08** s/token     | 8 s/token            | 8 s/token                      | 3 s/token                                       | 5 s/token                                         |
+| **Llama 3.1-8B** | 65 s/token       | 31 s/token     | **1** s/token        | 11 s/token           | 12 s/token                     | 4 s/token                                       | 8 s/token                                         |
+| **Llama 2-13B**  | OOM              | OOM            | 10 s/token           | 20 s/token           | 18 s/token                     | **3** s/token                                   | 9 s/token                                         |
+| **Yi-34B**       | OOM              | OOM            | 29 s/token           | 51 s/token           | 55 s/token                     | **14** s/token                                  | 29 s/token                                        |
+
+*Note: We set up two testbeds: the home testbed (4 laptops connected via local Wi-Fi) and the Klonet testbed (8 devices connected via a wire edge network).*
+
+*Note: Computations were in **full precision** on **solely CPUs**, except for llama.cpp, which used Apple Metal Graphics and INT4/INT8 quantization for acceleration.*
+
+*Note: Except for TPI-LLM, all other benchmarks were run on a Mac M1 laptop with 8 cores and 8GB memory.*
+
+In the future, we plan to migrate to llama.cpp and add supports for Q4/Q8 quantizations and integrated GPUs.
 
 # Installation
 ## Use the Source Code
