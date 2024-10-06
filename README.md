@@ -28,7 +28,8 @@ over 90% compared to [Transformers](https://github.com/huggingface/transformers)
 
 *Note: Except for TPI-LLM, all other benchmarks were run on a Mac M1 laptop with 8 cores and 8GB memory.*
 
-In the future, we plan to migrate to llama.cpp and add supports for Q4/Q8 quantizations and integrated GPUs.
+In the future, we plan to migrate to llama.cpp, add supports for Q4/Q8 quantizations and integrated GPUs, and further
+improve the parallelism paradigm, in order to support infinitely large models in a low token latency.
 
 # Installation
 ## Use the Source Code
