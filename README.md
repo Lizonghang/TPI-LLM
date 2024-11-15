@@ -1,19 +1,17 @@
 # TPI-LLM: Serving 70b-scale LLMs Efficiently on Low-resource Edge Devices
-TPI-LLM (Tensor Parallelism Inference for Large Language Models) is a LLM service system designed to bring LLM 
+TPI-LLM (Tensor Parallelism Inference for Large Language Models) is a LLM serving system designed to bring LLM 
 functions to low-resource edge devices. While cloud LLM services have achieved great success, privacy 
 concerns arise and users do not want their conversations uploaded to the cloud as these conversations could 
 involve sensitive personal information.
 
-Our TPI-LLM system addresses the privacy issue by enabling LLM inference on edge devices with limited resources. 
+Our TPI-LLM system addresses the privacy issue by enabling LLM inference on edge devices with limited computing and memory resources. 
 The system leverages multiple edge devices to perform inference through tensor parallelism, combined with 
-a sliding window memory scheduler to minimize memory usage. Currently, TPI-LLM can run Yi-34B in
+a sliding window memory scheduler to reduce peak memory footprint. Currently, TPI-LLM can run Yi-34B in
 full precision on 4 laptops with 5GB of memory on each laptop, and run Llama 2-70B on 8 devices 
-with 3GB of memory on each device. Furthermore, TPI-LLM has demonstrated over 80% less TTFT and token latency
-compared to [Accelerate](https://huggingface.co/docs/accelerate/en/usage_guides/big_modeling), 
-over 90% compared to [Transformers](https://github.com/huggingface/transformers) and 
-[Galaxy](https://github.com/ysyisyourbrother/Galaxy-LM), and 50\%-70\% compared to 
-[llama.cpp](https://github.com/ggerganov/llama.cpp) on larger models (>13B).
+with 3GB of memory on each device. Furthermore, TPI-LLM has demonstrated 80%-90% less TTFT and token latency
+compared to [Transformers](https://github.com/huggingface/transformers), [Accelerate](https://huggingface.co/docs/accelerate/en/usage_guides/big_modeling), [Galaxy](https://github.com/ysyisyourbrother/Galaxy-LM), and 43%-55% less compared to [llama.cpp](https://github.com/ggerganov/llama.cpp) on larger models (>13B).
 
+<!--
 | **Model (FP32)** | **Transformers** | **Accelerate** | **llama.cpp (INT4)** | **llama.cpp (INT8)** | **Transformers (with our MS)** | **TPI-LLM (Klonet, 8 devices, wire connected)** | **TPI-LLM (Home, 4 laptops, wireless connected)** |
 |------------------|------------------|----------------|----------------------|----------------------|--------------------------------|-------------------------------------------------|---------------------------------------------------|
 | **Llama 2-3B**   | 30 s/token       | 16 s/token     | **0.05** s/token     | 0.07 s/token         | 3 s/token                      | 2 s/token                                       | 2 s/token                                         |
@@ -24,12 +22,10 @@ over 90% compared to [Transformers](https://github.com/huggingface/transformers)
 
 *Note: We set up two testbeds: the home testbed (4 laptops connected via local Wi-Fi) and the Klonet testbed (8 devices connected via a wire edge network).*
 
-*Note: Computations were in **full precision** on **solely CPUs**, except for llama.cpp, which used Apple Metal Graphics and INT4/INT8 quantization for acceleration.*
-
 *Note: Except for TPI-LLM, all other benchmarks were run on a Mac M1 laptop with 8 cores and 8GB memory.*
+-->
 
-In the future, we plan to migrate to llama.cpp, add supports for Q4/Q8 quantizations and integrated GPUs, and further
-improve the parallelism paradigm, in order to support infinitely large models in a low token latency.
+*Note: Computations were in **full precision** on **solely CPUs**, except for llama.cpp, which used Apple Metal Graphics and Q8 quantization for acceleration.*
 
 # Installation
 ## Use the Source Code
@@ -163,6 +159,3 @@ Below is a list of these options:
 | `--disable_memory_schedule` | `False`   | `bool`  | Set to True to disable memory window scheduling, this may lead to higher speed.                      |
 | `--memory_window`           | `2`       | `int`   | Size of the memory window used during inference. Should be at least 2.                               |
 | `--torch_dist`              | `False`   | `bool`  | Whether to use torch.distributed.                                                                    |
-
-# Cite Us
-Upcoming, the paper is under review.
